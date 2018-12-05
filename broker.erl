@@ -88,6 +88,11 @@ handle_call(_Request, _From, State) ->
 			 {noreply, NewState :: term(), Timeout :: timeout()} |
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), NewState :: term()}.
+%% receive mapdt_open_rsp from smsrouter_worker
+handle_cast({order, OrderType, DlgId, Data}, State)->
+    io:format("send back to c node ~n"),
+    {any, 'c1@elmir-N56VZ'} ! {OrderType, DlgId, Data},
+    {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -110,6 +115,17 @@ handle_info({dlg_ind_open, DlgId, Data}, State) ->
     io:format("worker with pid started = ~p~n",[Pid]),
     gen_server:cast(Pid, {dlg_ind_open, Data}),
     {noreply, State};
+
+handle_info({srv_ind, DlgId, Data}, State) ->
+    [{_, Pid}] = ets:lookup(didpid, DlgId),
+    gen_server:cast(Pid, {srv_ind, Data}),
+    {noreply, State};
+
+handle_info({delimit_ind, DlgId, Data}, State) ->
+    [{_, Pid}] = ets:lookup(didpid, DlgId),
+    gen_server:cast(Pid, {delimit_ind, Data}),
+    {noreply, State};
+
 
 handle_info(_Info, State) ->
     {noreply, State}.

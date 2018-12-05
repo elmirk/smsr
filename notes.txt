@@ -1,0 +1,117 @@
+********************************************************
+this is for all notes during the project smsr
+*********************************************************
+
+//way to start erlang node
+erl -sname smsrouter -setcookie hello
+
+
+
+
+//example of MAP_MSG_DLG_IND (0x87e3)
+//received by smsrouter
+// p02 010d13353706001104970566152009 030d133c3708001104970566151000 0b09060704000001001403 00
+
+0x87e3 - MAP-DIALOGUE-IND, Transfers dialogue indication primitives and dialogue confirmation primitives from MAP to MAP-User.
+
+02 - primitive type, 0x02 - MAPDT_OPEN_IND
+
+010d13353706001104970566152009 :
+
+01 - destination address, MAPPN_dest_address,
+0d - length
+13353706001104970566152009 - sccp called, as in Q. document
+
+030d133c3708001104970566151000 :
+
+03 - originating address, MAPPN_orig_address
+0d - lengh
+133c3708001104970566151000 - sccp calling
+
+
+0b09060704000001001403 :
+
+0b - application context name, MAPPN_applic_context
+09 - length
+0607 04 00 00 01 00 1403 - application context encoded as in Q.773 commencing with the Object Identifier Name tag.
+
+shortMsgGatewayContext-v3 APPLICATION-CONTEXT
+-- Responder is HLR if Initiator is GMSC
+INITIATOR CONSUMER OF {
+ShortMsgGatewayPackage-v3}
+::= {map-ac shortMsgGateway(20) version3(3)}
+
+20(dec) 03 == 14(hex) 03
+
+надо где то хранить application context with sccp calling address when receive dlg_ind from remote
+
+******************************************************************
+* MAP_SRV_IND parsing example
+*
+* could be used as input test data
+******************************************************************
+S7L:2018-09-21 11:16:42.900 I0000 T E00000020 M t87e1 i8000 f15 d2e s00 p020e01b5 0f07919793934381f3 100101 1107919705661510f000
+
+87e1 - map msg srv ind
+p02 0e01b5 0f07919793934381f3 100101 1107919705661510f000
+
+02 - MAP-SEND-ROUTING-INFO-FOR-SM-IND
+0e - MAPPN_invoke_id
+
+0x0f - MAPPN_msisdn
+
+10 - Short Message Delivery Priority MAPPN_sm_rp_pri
+
+0x11 - Short Message Service Centre Address MAPPN_sc_addr
+
+
+********************************************************************
+MAP MSG DLG REQ
+S7L:2018-09-21 11:16:42.903 I0000 T E00000020 M tc7e2 i0001 f2e d15 s00 p010b09060704000001001403010b1206001104970566152000030b120800110497056615200900
+
+01 - mapdt_open_req
+0b09060704000001001403  mappn_applic_context
+010b1206001104970566152000 mappn_dest_address
+7950665102000
+
+030b1208001104970566152009 mappn_orig_address
+00 - terminator
+
+******************************************************************
+*MAP OPEN REQ to HLR to retrieve SRI_SM data from SMSROUTER
+*****************************************************************
+* mapMsg_dlg_req tc7e2 i0001 f2e d15 s00 p010b09060704000001001403 010b1206001104970566152000030b120800110497056615200900 map open req
+
+01 - mapdt_open_req
+0b09060704000001001403 ac context
+010b1206001104970566152000 destination address
+030b1208001104970566152009 originating address
+00                         terminator
+
+
+********************************************************************
+!!MAP MSG DLG delimiter
+*********************************************************************
+S7L:2018-09-21 11:16:42.900 map msg dlg ind t87e3 i8000 f15 d2e s00 p0600
+
+mapdt_delimiter_ind 0x06
+terminator 0x00
+
+
+
+TODO
+
+====== MAP SRI SM from HLR part to SMS router========
+
+1 - receive DLG_IND_OPEN ->
+
+dyn_worker should:
+ change internal dialog state to WAIT_FOR_DATA
+ should send DLG_OPEN_RSP to C node (ORDER_OPEN_RSP to C node) 
+
+2 - receive SRV_IND with MAP SRI SM
+ keep internal state WAIT_FOR_DATA
+
+3 - receive MAP_DELIMIT_IND from C node
+dyn_worker should send send ORDER_SRI_SM to C node
+ -- MSP

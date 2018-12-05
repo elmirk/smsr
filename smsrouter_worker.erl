@@ -1,3 +1,20 @@
+%%
+%%
+%% dynamic worker, started when DLG_OPEN_IND received
+%%
+
+
+%% this should be used to construct binary to send to C node
+
+%%my_list_to_binary(List) ->
+%%    my_list_to_binary(List, <<>>).
+
+%%my_list_to_binary([H|T], Acc) ->
+%%    my_list_to_binary(T, <<Acc/binary,H>>);
+%%my_list_to_binary([], Acc) ->
+%%    Acc.
+
+
 %%%-------------------------------------------------------------------
 %%% @author root <root@ubuntu>
 %%% @copyright (C) 2018, root
@@ -19,16 +36,23 @@
 
 -define(SERVER, ?MODULE).
 
+%% definest should be checked before production!!
+%% !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 -define(mapdt_open_ind, 2).
+-define(mapdt_open_rsp, 16#81).
+-define(mapdt_open_req, 16#01).
+-define(mappn_result, 9).
+
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
 -define(ac_name, 11).
+-define(mappn_applic_context, 16#0b).
 
 -record(state, {}).
 -record(dialog, {dlg_id, sccp_calling, sccp_called, ac_name}).
 -record(sccp, {sccp_calling, sccp_called, ac_name}).
 
-
+-include("dyn_defs.hrl").
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -104,7 +128,30 @@ handle_cast({dlg_ind_open, Request}, State) ->
     io:format("sccp_calling from PD = ~p~n",[get(sccp_calling)]),
     io:format("sccp_called from PD = ~p~n",[get(sccp_called)]),
     io:format("ac name = ~p~n", [get(ac_name)]),
+
+%% suppose we analyxe dlg_ind_open messages and SMSR allow to establish dialogue
+%% Now let's send DLG_OPEN_RSP bask to C node!
+
+%% {mapdt_open_rsp, DlgId, BinaryData}
+    Payload = create_map_open_rsp_payload(),
+    gen_server:cast(broker, {order, ?mapdt_open_rsp, 64700, list_to_binary(Payload)}),
+
+    {noreply, State};
+
+handle_cast({srv_ind, Request}, State) ->
+    io:format("srv_ind received ~n"),
+    ok = parse_srv_data(binary:bin_to_list(Request)),
+   io:format("invoke_id from PD = ~p~n",[get(invoke_id)]),
+    io:format("msisdn from PD = ~p~n",[get(msisdn)]),
+    io:format("sm rp pri name = ~p~n", [get(sm_rp_pri)]),
+    io:format("sc addr = ~p~n", [get(sc_addr)]),
+    {noreply, State};
+handle_cast({delimit_ind, Request}, State) ->
+    Payload = create_map_open_req_payload(),
+    gen_server:cast(broker, {order, ?mapdt_open_req, 64700, list_to_binary(Payload)}),
+
     {noreply, State}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -164,6 +211,7 @@ format_status(_Opt, Status) ->
 %%% Internal functions
 %%%===================================================================
 %% parse binary data received from C node
+%% this is for received mapdt_dlg_ind received from C node
 parse_data([])->
     ok;
 parse_data([?mapdt_open_ind | T])->
@@ -192,4 +240,61 @@ parse_ac(Data = [H|T])->
     AcData = lists:sublist(Data, 1, H+1),
     put(ac_name, AcData),
     io:format("ac data = ~p~n", [AcData]).
+    
+
+%% pptr[0] = MAPDT_OPEN_RSP;
+%%    pptr[1] = MAPPN_result;
+%%    pptr[2] = 0x01;
+%%    pptr[3] = result;
+ %%   pptr[4] = MAPPN_applic_context;
+%%    pptr[5] = (u8)dlg_info->ac_len;
+%%    memcpy((void*)(pptr+6), (void*)dlg_info->app_context, dlg_info->ac_len);
+%%    pptr[6+dlg_info->ac_len] = 0x00;
+
+
+create_map_open_rsp_payload()->
+    create_map_open_rsp_payload([?mapdt_open_rsp], mappn_result).
+create_map_open_rsp_payload(List, mappn_result) ->
+    List2 = List ++ [?mappn_result] ++ [1] ++ [17],
+    create_map_open_rsp_payload(List2, terminator);
+create_map_open_rsp_payload(List, terminator) ->
+    List ++ [0].
+
+%% create payload for MAP_OPEN_REQ
+create_map_open_req_payload()->
+    create_map_open_req_payload([?mapdt_open_req], mappn_applic_context).
+create_map_open_req_payload(List, mappn_applic_context) ->
+    List2 = List ++ [?mappn_applic_context] ++ get(ac_name).
+
+
+%% parsing received srv_ind data from C node
+parse_srv_data([?mapst_snd_rtism_ind | T]) ->
+    parse_srv_data(T);
+parse_srv_data([?mappn_invoke_id | [Length | T]]) ->
+    InvokeId = lists:sublist(T, 1, Length ),
+    put(invoke_id, InvokeId),
+    Out = lists:nthtail(Length, T),
+    parse_srv_data(Out);
+parse_srv_data([?mappn_msisdn | [Length | T]]) ->
+    Msisdn = lists:sublist(T, 1, Length ),
+    put(msisdn, Msisdn),
+    Out = lists:nthtail(Length, T),
+    parse_srv_data(Out);
+parse_srv_data([?mappn_sm_rp_pri | [Length | T]]) ->
+    Smrppri = lists:sublist(T, 1, Length ),
+    put(sm_rp_pri, Smrppri),
+    Out = lists:nthtail(Length, T),
+    parse_srv_data(Out);
+parse_srv_data([?mappn_sc_addr | [Length | T]]) ->
+    Smscaddr = lists:sublist(T, 1, Length ),
+    put(sc_addr, Smscaddr),
+    Out = lists:nthtail(Length, T),
+    parse_srv_data(Out);
+parse_srv_data([0])->
+    ok.
+
+    
+
+
+
     
