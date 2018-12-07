@@ -115,3 +115,28 @@ dyn_worker should:
 3 - receive MAP_DELIMIT_IND from C node
 dyn_worker should send send ORDER_SRI_SM to C node
  -- MSP
+
+
+===============================================================
+map msg dlg req with primitive map open rsp
+
+S7L:2018-09-21 11:16:42.901 map msg dlg req tc7e2 i8000 f2e d15 s00 p81 050100 0b0906070400000100140300 - map dt open rsp
+
+05 - 
+
+
+
+================================================================
+SRI for SM SRV IND from SMSR to HLR
+
+
+S7L:2018-09-21 11:16:42.903 I0000 T E00000020 M tc7e0 i0001 f2e d15 s00
+p01 sri sm req
+0e01b5
+0f07919793934381f3
+100101
+1107919705661510f0
+00 - terminator
+
+- service request - MAP_MSG_SRV_REQ, 0x01 - MAPST_SND_RTSIM_REQ
+

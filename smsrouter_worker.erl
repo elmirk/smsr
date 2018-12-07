@@ -39,20 +39,21 @@
 %% definest should be checked before production!!
 %% !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 -define(mapdt_open_ind, 2).
--define(mapdt_open_rsp, 16#81).
--define(mapdt_open_req, 16#01).
--define(mappn_result, 9).
+%%-define(mapdt_open_rsp, 16#81).
+%%-define(mapdt_open_req, 16#01).
+%%-define(mappn_result, 9).
 
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
 -define(ac_name, 11).
--define(mappn_applic_context, 16#0b).
+%% -define(mappn_applic_context, 16#0b).
 
 -record(state, {}).
 -record(dialog, {dlg_id, sccp_calling, sccp_called, ac_name}).
 -record(sccp, {sccp_calling, sccp_called, ac_name}).
 
 -include("dyn_defs.hrl").
+-include("gctload.hrl").
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -133,8 +134,10 @@ handle_cast({dlg_ind_open, Request}, State) ->
 %% Now let's send DLG_OPEN_RSP bask to C node!
 
 %% {mapdt_open_rsp, DlgId, BinaryData}
+%% should construct payload like this
+%%  p810501000b0906070400000100140300
     Payload = create_map_open_rsp_payload(),
-    gen_server:cast(broker, {order, ?mapdt_open_rsp, 64700, list_to_binary(Payload)}),
+    gen_server:cast(broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, 64700, list_to_binary(Payload)}),
 
     {noreply, State};
 
@@ -147,8 +150,18 @@ handle_cast({srv_ind, Request}, State) ->
     io:format("sc addr = ~p~n", [get(sc_addr)]),
     {noreply, State};
 handle_cast({delimit_ind, Request}, State) ->
+
+%% TODO - we receive delimit and we should analyze what kind of component we recevied bevoe in SRV_IND
+%% component should be saved in State like component list
+%% Payload here should be like
+%% p010b09060704000001001403010b1206001104970566152000030b120800110497056615200900
+%% also we should choos dlg id for outgoing dlgs
     Payload = create_map_open_req_payload(),
-    gen_server:cast(broker, {order, ?mapdt_open_req, 64700, list_to_binary(Payload)}),
+    gen_server:cast(broker, {order, ?map_msg_dlg_req, ?mapdt_open_req, 64700, list_to_binary(Payload)}),
+%% payload here
+%% 
+    Payload2 = map_srv_req_primitive(snd_rtism_req),
+    gen_server:cast(broker, {order, ?map_msg_srv_req, ?mapst_snd_rtism_req, 64700, list_to_binary(Payload2)}),
 
     {noreply, State}.
 
@@ -255,7 +268,12 @@ parse_ac(Data = [H|T])->
 create_map_open_rsp_payload()->
     create_map_open_rsp_payload([?mapdt_open_rsp], mappn_result).
 create_map_open_rsp_payload(List, mappn_result) ->
-    List2 = List ++ [?mappn_result] ++ [1] ++ [17],
+    Result = [?mappn_result, 1, 0],
+    List2 = List ++ Result,
+    create_map_open_rsp_payload(List2, mappn_applic_context);
+create_map_open_rsp_payload(List, mappn_applic_context) ->
+    ACname = [?mappn_applic_context] ++ get(ac_name),
+    List2 = List ++ ACname,
     create_map_open_rsp_payload(List2, terminator);
 create_map_open_rsp_payload(List, terminator) ->
     List ++ [0].
@@ -293,6 +311,9 @@ parse_srv_data([?mappn_sc_addr | [Length | T]]) ->
 parse_srv_data([0])->
     ok.
 
+-spec map_srv_req_primitive( atom() ) -> binary().
+map_srv_req_primitive(snd_rtism_req)->
+    [1, 2 ,3].
     
 
 

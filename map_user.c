@@ -12,6 +12,15 @@
 
 #define ORDER_MAP_DLG_OPEN_REQ  1//erlang decide that c node should establish outgoing dialouge with some node
 #define ORDER_MAP_DLG_OPEN_RSP 0x81 //erland decide that c node should send DLG_OPEN_RSP
+#define ORDER_MAPST_SND_RTSIM_REQ 2 //erlang decide that c node should send MAP_MSG_SRV_REQ
+
+#define MAP_MSG_SRV_REQ 0xc7e0
+#define MAP_MSG_SRV_IND 0x87e1
+#define MAP_MSG_DLG_REQ 0xc7e2
+#define MAP_MSG_DLG_IND 0x87e3
+
+
+
 //ORDER_MAP_SRV_SRISM_RSP //C node should send SRI_SM_ack to SMSC-GMSC
 //ORDER_MAP_DLG_CLOSE_REQ //dialog close request
 
@@ -36,9 +45,13 @@ int fd2[2];//File descriptor for creating a pipe
 #define ERROR_JOIN_THREAD   -12
 #define SUCCESS        0
 
+
+/* orders received from erlang node */
+
 struct order {
 
-  unsigned int type;
+  unsigned int msg_type;
+  unsigned int primitive_type;
   int dlg_id;
   unsigned char payload_length;
   unsigned char payload[64];
@@ -53,7 +66,8 @@ struct order {
 void* erl_receiver(int *args) {
   ErlMessage emsg1;                         /* Incoming message */
   ETERM *fromp, *tuplep, *fnp, *argp, *resp;
-  ETERM *order_type = NULL;
+  ETERM *msg_type = NULL;
+  ETERM *primitive_type = NULL;
   ETERM *dlg_id = NULL;
   ETERM *payload = NULL;
   int got, result;
@@ -81,16 +95,16 @@ unsigned char buf[BUFSIZE];              /* Buffer for incoming message */
      else if (emsg1.type == ERL_REG_SEND)
        {
 	 printf("receive PAYLOAD from erlang\n");	 
-	     order_type = erl_element(1, emsg1.msg);
-	     dlg_id = erl_element(2, emsg1.msg);
-	     payload = erl_element(3, emsg1.msg);
+	     msg_type = erl_element(1, emsg1.msg);
+	     primitive_type = erl_element(2, emsg1.msg);
+	     dlg_id = erl_element(3, emsg1.msg);
+	     payload = erl_element(4, emsg1.msg);
 	     //printf("pointer of dlg ind type = %p\n", dlg_ind_type);
-	     printf("receive something, not TICK\n");
 	     //printf("decoded atom = %s/n", ERL_ATOM_PTR(dlg_ind_type));
 	     //printf("is atom = %d\n", ERL_IS_ATOM(dlg_ind_type));
-	     order.type = ERL_INT_UVALUE(order_type); 
-	     printf("order type from erlang = %d\n", ERL_INT_UVALUE(order_type));
-	     printf("dlg id from erlang = %d\n", ERL_INT_UVALUE(dlg_id));
+	     order.msg_type = ERL_INT_UVALUE(msg_type); 
+	     //printf("msg type from erlang = %x\n", ERL_INT_UVALUE(msg_type));
+	     //printf("dlg id from erlang = %d\n", ERL_INT_UVALUE(dlg_id));
 	     order.dlg_id = ERL_INT_UVALUE(dlg_id);
 	     printf("number of bytes in bynary = %d\n", ERL_BIN_SIZE(payload));
 
@@ -132,6 +146,57 @@ int     result;
    }
   return SUCCESS;
 }
+
+int mapu_create_msg() {
+
+
+}
+
+
+
+int mapu_send_msg(struct order *ptr) {
+
+/*
+   * Allocate a message (MSG) to send:
+   */
+  /*
+  if ((m = getm((u16)MAP_MSG_DLG_REQ, dlg_id, NO_RESPONSE, (u16)(7 + dlg_info->ac_len))) != 0)
+  {
+    m->hdr.src = smsr_mod_id;
+    m->hdr.dst = smsr_map_id;
+  */
+    /*
+     * Format the parameter area of the message
+     *
+     * Primitive type   = Open response
+     * Parameter name   = result_tag
+     * Parameter length = 1
+     * Parameter value  = result
+     * Parameter name   = applic_context_tag
+     * parameter length = len
+     * parameter data   = applic_context
+     * EOC_tag
+     */
+  /*   pptr = get_param(m);
+    pptr[0] = MAPDT_OPEN_RSP;
+    pptr[1] = MAPPN_result;
+    pptr[2] = 0x01;
+    pptr[3] = result;
+    pptr[4] = MAPPN_applic_context;
+    pptr[5] = (u8)dlg_info->ac_len;
+    memcpy((void*)(pptr+6), (void*)dlg_info->app_context, dlg_info->ac_len);
+    pptr[6+dlg_info->ac_len] = 0x00; */
+
+    /*
+     * Now send the message
+     */
+
+  
+  printf("%s:\n",__PRETTY_FUNCTION__);
+
+  return 0;
+}
+
 /**********************************************************************
 *
 * main function
@@ -319,7 +384,16 @@ struct timeval tv;
       {
 	read(fd1[0], buffer, sizeof (struct order));
 	p_order = (struct order *) &buffer[0];
-        printf("%s:rcv from erlang=%d\n", __PRETTY_FUNCTION__, p_order->type);
+        printf("%s:rcv from erlang=%x\n", __PRETTY_FUNCTION__, p_order->msg_type);
+	switch(p_order->msg_type)
+	  {
+	  case MAP_MSG_SRV_REQ:
+	  case MAP_MSG_SRV_IND: 
+	  case MAP_MSG_DLG_REQ:
+	  case MAP_MSG_DLG_IND:
+	    mapu_send_msg(p_order);
+	    break;
+	  }
       }
     else if (FD_ISSET(fd2[0], &readfds))
       {

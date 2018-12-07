@@ -89,9 +89,9 @@ handle_call(_Request, _From, State) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), NewState :: term()}.
 %% receive mapdt_open_rsp from smsrouter_worker
-handle_cast({order, OrderType, DlgId, Data}, State)->
+handle_cast({order, MsgType, PrimitiveType, DlgId, Data}, State)->
     io:format("send back to c node ~n"),
-    {any, 'c1@elmir-N56VZ'} ! {OrderType, DlgId, Data},
+    {any, 'c1@elmir-N56VZ'} ! {MsgType, PrimitiveType, DlgId, Data},
     {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
