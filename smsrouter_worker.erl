@@ -46,6 +46,8 @@
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
 -define(ac_name, 11).
+-define(dummy_dest, [16#12, 16#06, 0, 16#11, 16#04, 16#97, 16#15, 16#60, 16#52, 16#55, 16#05]).
+-define(smsr_sccp_gt, [16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#09]).
 %% -define(mappn_applic_context, 16#0b).
 
 -record(state, {}).
@@ -279,10 +281,26 @@ create_map_open_rsp_payload(List, terminator) ->
     List ++ [0].
 
 %% create payload for MAP_OPEN_REQ
+%% we should construct DLG_REQ message with MAPDT_OPEN_REQ
+%%* mapMsg_dlg_req tc7e2 i0001 f2e d15 s00 p010b09060704000001001403 010b1206001104970566152000030b120800110497056615200900 map open req
+
+%% 01 - mapdt_open_req
+%% 0b 09 060704000001001403 ac context
+%% 010b 1206001104970566152000 destination address
+%% 030b 1208001104970566152009 originating address
+%% 00                         terminator
+
 create_map_open_req_payload()->
     create_map_open_req_payload([?mapdt_open_req], mappn_applic_context).
 create_map_open_req_payload(List, mappn_applic_context) ->
-    List2 = List ++ [?mappn_applic_context] ++ get(ac_name).
+    List2 = List ++ [?mappn_applic_context] ++ get(ac_name),
+    create_map_open_req_payload(List2, sccp_called);
+create_map_open_req_payload(List, sccp_called) ->
+    List2 = List ++ [?mappn_dest_address] ++ ?dummy_dest, 
+    create_map_open_req_payload(List2, sccp_calling);
+create_map_open_req_payload(List, sccp_calling) ->
+    List2 = List ++ [?mappn_orig_address] ++ ?smsr_sccp_gt,
+    List2 ++ [0].
 
 
 %% parsing received srv_ind data from C node

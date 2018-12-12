@@ -19,6 +19,12 @@
 
 -define(SERVER, ?MODULE).
 
+-ifdef(prod).
+-define(c_node, 'c1@ubuntu').
+-else.
+-define(c_node, 'c1@elmir-N56VZ').
+-endif.
+
 -record(state, {}).
 
 %%%===================================================================
@@ -91,7 +97,7 @@ handle_call(_Request, _From, State) ->
 %% receive mapdt_open_rsp from smsrouter_worker
 handle_cast({order, MsgType, PrimitiveType, DlgId, Data}, State)->
     io:format("send back to c node ~n"),
-    {any, 'c1@elmir-N56VZ'} ! {MsgType, PrimitiveType, DlgId, Data},
+    {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
     {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.

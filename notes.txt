@@ -5,7 +5,9 @@ this is for all notes during the project smsr
 //way to start erlang node
 erl -sname smsrouter -setcookie hello
 
-
+//using rsync for syncing files
+// use rsync.sh to do this
+rsync -e ssh -rvzcn root@172.27.27.49:/opt/smsr/src
 
 
 //example of MAP_MSG_DLG_IND (0x87e3)
@@ -83,9 +85,9 @@ S7L:2018-09-21 11:16:42.903 I0000 T E00000020 M tc7e2 i0001 f2e d15 s00 p010b090
 * mapMsg_dlg_req tc7e2 i0001 f2e d15 s00 p010b09060704000001001403 010b1206001104970566152000030b120800110497056615200900 map open req
 
 01 - mapdt_open_req
-0b09060704000001001403 ac context
-010b1206001104970566152000 destination address
-030b1208001104970566152009 originating address
+0b 09 060704000001001403 ac context
+010b 1206001104970566152000 destination address
+030b 1208001104970566152009 originating address
 00                         terminator
 
 
