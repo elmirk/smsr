@@ -1,3 +1,10 @@
+useful:
+
+git rm --cached dyn_defs.hrl    //remove file from git but not from filesystem
+
+
+
+
 ********************************************************
 this is for all notes during the project smsr
 *********************************************************
@@ -9,30 +16,31 @@ erl -sname smsrouter -setcookie hello
 // use rsync.sh to do this
 rsync -e ssh -rvzcn root@172.27.27.49:/opt/smsr/src
 
-
-//example of MAP_MSG_DLG_IND (0x87e3)
-//received by smsrouter
-// p02 010d13353706001104970566152009 030d133c3708001104970566151000 0b09060704000001001403 00
-
-0x87e3 - MAP-DIALOGUE-IND, Transfers dialogue indication primitives and dialogue confirmation primitives from MAP to MAP-User.
-
-02 - primitive type, 0x02 - MAPDT_OPEN_IND
-
-010d13353706001104970566152009 :
-
+******************************************************************************************************
+* messge MAP_MSG_DLG_IND (0x87e3) with primitive MAPDT_OPEN_IND                                      *
+*                                                                                                    *
+******************************************************************************************************
+* receiver: map_user
+* msg parameter area -  p02 010d13353706001104970566152009 030d133c3708001104970566151000 0b09060704000001001403 00
+*
+*0x87e3 - MAP-DIALOGUE-IND, Transfers dialogue indication primitives and dialogue confirmation primitives from MAP to M*AP-User.
+*
+* params parsing:
+*
+* 02 - primitive type, 0x02 - MAPDT_OPEN_IND
+*
+* 010d13353706001104970566152009 :
+*
 01 - destination address, MAPPN_dest_address,
 0d - length
 13353706001104970566152009 - sccp called, as in Q. document
 
 030d133c3708001104970566151000 :
-
 03 - originating address, MAPPN_orig_address
 0d - lengh
 133c3708001104970566151000 - sccp calling
 
-
 0b09060704000001001403 :
-
 0b - application context name, MAPPN_applic_context
 09 - length
 0607 04 00 00 01 00 1403 - application context encoded as in Q.773 commencing with the Object Identifier Name tag.
@@ -43,17 +51,19 @@ INITIATOR CONSUMER OF {
 ShortMsgGatewayPackage-v3}
 ::= {map-ac shortMsgGateway(20) version3(3)}
 
-20(dec) 03 == 14(hex) 03
-
-надо где то хранить application context with sccp calling address when receive dlg_ind from remote
-
-******************************************************************
-* MAP_SRV_IND parsing example
+*20(dec) 03 == 14(hex) 03
+*
+*Notes:
+*надо где то хранить application context with sccp calling address when receive dlg_ind from remote
+*
+**********************************************************************************************************
+* message type MAP_SRV_IND 87e1 with service primitive MAP-SEND-ROUTING-FOR-SM-IND
 *
 * could be used as input test data
 ******************************************************************
 S7L:2018-09-21 11:16:42.900 I0000 T E00000020 M t87e1 i8000 f15 d2e s00 p020e01b5 0f07919793934381f3 100101 1107919705661510f000
 
+receiver: map_user
 87e1 - map msg srv ind
 p02 0e01b5 0f07919793934381f3 100101 1107919705661510f000
 
@@ -142,3 +152,130 @@ p01 sri sm req
 
 - service request - MAP_MSG_SRV_REQ, 0x01 - MAPST_SND_RTSIM_REQ
 
+
+*******************************************************************************************************
+when smsrouter send SRI_SM to HLR, then we receive from HLR(MAP) - confirmationa
+//MAP MSG DLG IND with primitive type MAPDT_OPEN_CNF
+S7L:2018-09-21 11:16:42.917 I0000 T E00000020 M t87e3 i0001 f15 d2e s00 p82 050100 0b09060704000001001403 010d13353708001104970566152009 030d133c370600110497056615200000
+
+0x82 - MAPDT_OPEN_CNF
+050100
+0b09060704000001001403 - application context name
+010d13353708001104970566152009 - destination address
+030d133c3706001104970566152000 - originating address
+00 - terminator
+
+
+MAP_MSG_SRV_IND received from HLR after DLG_CNF received
+message type MAP_MSG_SRV_IND 0x87e1
+
+S7L:2018-09-21 11:16:42.917 I0000 T E00000020 M t87e1 i0001 f15 d2e s00 p82 0e01b5 120852200701304377f7 1307919705661520f100
+0x82 MAP-SEND-ROUTING-INFO-FOR-SM-CNF MAPST_SND_RTISM_CNF
+0e01b5 - invoke id
+120852200701304377f7  MAPPN_imsi
+1307919705661520f1  MSC Number MAPPN_msc_num 19 0x13
+00 - terminator
+
+
+//MAP-DIALOGUE-IND MAP_MSG_DLG_IND 0x87e3 with MAP-CLOSE-IND MAPDT_CLOSE_IND 4 0x04
+S7L:2018-09-21 11:16:42.918 I0000 T E00000020 M t87e3 i0001 f15 d2e s00 p0400
+
+receiving dlg close from HLR should trigger sending SRI_SM response from SMSR to SMSC
+next message sequence used for it
+
+MAP_MSG_SRV_REQ
+S7L:2018-09-21 11:16:42.919 map msg srv req tc7e0 i8000 f2e d15 s00 p81 0e01b5 120852200701304377f7 1307919705661520f900 MAPST_SND_RTISM_RSP
+
+p81 MAP-SEND-ROUTING-INFO-FOR-SM-RSP MAPST_SND_RTISM_RSP 129 0x81
+0e01b5 invoke id
+120852200701304377f7
+1307919705661520f9 MSC number, here we use SMSR GT as SMS number!
+00 terminator
+
+S7L:2018-09-21 11:16:42.919 map msg dlg req  tc7e2 i8000 f2e d15 s00 p0307010000 - map dt close req
+
+*************************************************************************************************************
+MAP MT FORWARD SM incoming to SMSR
+//here SMSR receive MAP MT FORWARD SM
+*************************************************************************************************************
+S7L:2018-09-21 11:16:42.956 I0000 T E00000021 M t87e3 i8001 f15 d2e s00 p02 010d13353708001104970566152009 030d133c3708001104970566151000 0b09060704000001001903 00
+
+02 - MAPDT_OPEN_IND
+
+0b09060704000001001903 - AC name = shortMsgMT_RelayContext_v3
+
+S7L:2018-09-21 11:16:42.957 I0000 T E00000021 M t87e1 i8001 f15 d2e s00 p46 0e01b6 191b240b919720171182f7000881901200532321080422043504410442 170a000852200701304377f7 18090407919705661510f0 1a0000
+
+46 - MAP-MT-FORWARD-SHORT-MESSAGE-IND
+(version 3 onwards) MAPST_MT_FWD_SM_IND 70 0x46
+Short Message User Information
+Field MAPPN_sm_rp_ui 25 0x19  Encoded as specified in ETS 300-599.
+More Messages To Send MAPPN_more_msgs 26 0x1a 00
+00 - terminator
+
+Short Message Destination
+Address MAPPN_sm_rp_da 23 0x17
+
+Short Message Originating
+Address MAPPN_sm_rp_oa 24 0x18
+
+S7L:2018-09-21 11:16:42.958 I0000 T E00000021 M t87e3 i8001 f15 d2e s00 p0600
+
+SMSR should reply:
+
+1) mapdt open rsp
+S7L:2018-09-21 11:16:42.958 I0000 T E00000021 M tc7e2 i8001 f2e d15 s00 p810501000b0906070400000100190300
+2) should be service request with map mt forward sm ack sent to SMC
+3) finally send DLG close to MAP layer
+
+After MAP MT FORWARD SM ACK send then SMSR should send MO FORWARD SM to SMSC!!
+
+
+
+
+
+
+******************************************************************************************************
+* APPLICATION CONTEXT NAME
+* some notes
+******************************************************************************************************
+shortMsgGatewayContext_v2_ac
+public static final TcapApplicationContext shortMsgGatewayContext_v2_ac
+Metadata for application context used for short message gateway procedures. Present in ph2.
+Application context name: { 0 4 0 0 1 0 20 2 }
+Initiator may invoke:
+MAPOperations.reportSM_DeliveryStatus
+MAPOperations.sendRoutingInfoForSM
+Responder may invoke:
+MAPOperations.informServiceCentre
+
+
+
+shortMsgGatewayContext_v3_ac
+public static final TcapApplicationContext shortMsgGatewayContext_v3_ac
+Metadata for application context used for short message gateway procedures. Responder is HLR if Initiator is GMSC. Added in R96.
+Application context name: { 0 4 0 0 1 0 20 3 }
+Initiator may invoke:
+MAPOperations.reportSM_DeliveryStatus_v3
+MAPOperations.sendRoutingInfoForSM_v3
+Responder may invoke:
+MAPOperations.informServiceCentre
+
+
+shortMsgMT_RelayContext_v2_ac
+public static final TcapApplicationContext shortMsgMT_RelayContext_v2_ac
+Metadata for application context used for mobile terminating short message relay procedures. Present in ph2.
+Application context name: { 0 4 0 0 1 0 25 2 }
+Initiator may invoke:
+MAPOperations.forwardSM
+
+
+shortMsgMT_RelayContext_v3_ac
+public static final TcapApplicationContext shortMsgMT_RelayContext_v3_ac
+Metadata for application context used between GMSC and MSC or between GMSC and SGSN for mobile terminating short message relay procedures. For the GMSC - SGSN interface version 2 and version 3 of this application context and the equivalent version 1 application context are applicable. Responder is MSC or SGSN if Initiator is GMSC. Added in R96.
+Application context name: { 0 4 0 0 1 0 25 3 }
+Initiator may invoke:
+MAPOperations.mt_ForwardSM
+
+
+********************************************************************************************************

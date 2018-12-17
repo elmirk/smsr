@@ -10,6 +10,7 @@
 
 -define(mapdt_open_req, 1).
 -define(mapdt_close_req, 3).
+-define(mapdt_close_ind, 4).
 -define(mapdt_delimiter_req, 5).
 -define(mapdt_u_abort_req, 7).
 -define(mapdt_open_rsp, 129).
@@ -17,8 +18,12 @@
 
 %% service primitive types
 
--define(mapst_snd_rtism_req, 1).
-
+-define(mapst_snd_rtism_req, 16#01).
+-define(mapst_snd_rtism_ind, 16#02).
+-define(mapst_snd_rtism_cnf, 16#82). %% sri_sm_ack received from HLR
+-define(mapst_snd_rtism_rsp, 16#81). %% send it to send sri_sm_ack to SMSC
+-define(mapst_mt_fwd_sm_ind, 16#46). %% map3 onwards
+-define(mapst_mt_fwd_sm_rsp, 16#bf). %%MAP_MT_FORWARD_SM_ACK to SMSC
 
 %% MAP Dialogue Primitive Parameters
 
@@ -33,4 +38,35 @@
 -define(mappn_msisdn, 15). %%MSISDN
 -define(mappn_sm_rp_pri, 16). %%Short Message Delivery Priority
 -define(mappn_sc_addr, 17). %%Short Message Service Centre Address
+-define(mappn_imsi, 18).
+-define(mappn_msc_num, 16#13).
+-define(mappn_sm_rp_ui, 16#19).
+-define(mappn_sm_rp_da, 16#17). %%Short Message Destination Address
+-define(mappn_sm_rp_oa, 16#18). %%Short Message Originating Address
+-define(mappn_more_msgs, 16#1a). %%More messages to send, special coding 1a00 - means true, look dialogic MAP manual.
 
+
+%%%
+
+%% First octet showing type of address encoded as specified
+%% in ETS 300-599, i.e.
+%% 0 – IMSI
+%% 1 – LMSI
+%% 3 – Roaming Number (MAP V1 only)
+%% 4 – Service centre address
+%% 5 – no SM-RP-DA (not MAP V1)
+%% Second octet, indicating the number of octets that follow.
+%% Subsequent octets containing the content octets of the
+%% IMSI, LMSI, Roaming Number or address string encoded
+%% as specified in ETS 300-599.
+
+%%
+%% First octet showing type of address encoded as specified
+%% in ETS 300-599, i.e.
+%% 2 – MSISDN
+%% 4 – Service centre address
+%% 5 – no SM-RP-OA (not MAP V1)
+%% Second octet, indicating the number of octets that follow.
+%% Subsequent octets containing the content octets of the
+%% MSISDN or address string encoded as specified in ETS
+%% 300-599.

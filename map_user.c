@@ -16,10 +16,12 @@
 #define ORDER_MAP_DLG_OPEN_RSP 0x81 //erland decide that c node should send DLG_OPEN_RSP
 #define ORDER_MAPST_SND_RTSIM_REQ 2 //erlang decide that c node should send MAP_MSG_SRV_REQ
 
+//#ifndef PROD
 //#define MAP_MSG_SRV_REQ 0xc7e0
 //#define MAP_MSG_SRV_IND 0x87e1
 //#define MAP_MSG_DLG_REQ 0xc7e2
 //#define MAP_MSG_DLG_IND 0x87e3
+//#endif
 
 #ifdef PROD
 #define ERL_NODE "smsrouter@ubuntu"
@@ -45,12 +47,14 @@
 
 //#include "sysgct.h"
 //#include "msg.h"
+
+//#ifdef PROD
 #include "system.h"
 #include "msg.h"
 #include "sysgct.h"
 #include "map_inc.h"
-
 #include "map_user.h"
+//#endif
 
 int fd1[2];//File descriptor for creating a pipe
 int fd2[2];//File descriptor for creating a pipe
@@ -67,7 +71,10 @@ int fd2[2];//File descriptor for creating a pipe
 //#define DEFAULT_MAP_ID           (MAP_TASK_ID)
 
 
-u8  mapu_mod_id = MAPU_MODULE_ID;
+u8 mapu_mod_id = MAPU_MODULE_ID;
+//u8 map_mod_id = MAP_TASK_ID;
+u8 map_mod_id = 0x15;
+
 
 static u8 mapu_trace = 1;
 
@@ -174,9 +181,11 @@ unsigned char buf[BUFSIZE];              /* Buffer for incoming message */
 	     //printf("msg type from erlang = %x\n", ERL_INT_UVALUE(msg_type));
 	     //printf("dlg id from erlang = %d\n", ERL_INT_UVALUE(dlg_id));
 	     order.dlg_id = ERL_INT_UVALUE(dlg_id);
-	     printf("number of bytes in bynary = %d\n", ERL_BIN_SIZE(payload));
+	     //printf("number of bytes in bynary = %d\n", ERL_BIN_SIZE(payload));
+	     order.payload_length = ERL_BIN_SIZE(payload);
 
-
+	     memcpy(&order.payload[0], ERL_BIN_PTR(payload), order.payload_length), 
+	     
 	 result = write(fd1[1], &order, sizeof(struct order));
 	 //	 if (result != 1){
 	 //  perror("write");
@@ -210,27 +219,23 @@ void *gct_receiver(void *args) {
 
   //   ch++;
 
-HDR *h;               /* received message */
+  HDR *h;               /* received message */
 
   while (1)
-  {
+    {
     /*
      * GCT_receive will attempt to receive messages
      * from the task's message queue and block until
      * a message is ready.
      */
-    if ((h = GCT_receive(mapu_mod_id)) != 0)
+      if ((h = GCT_receive(mapu_mod_id)) != 0)
 	{
-printf("h received in writer pthread  = %p\n", h);
-write(fd2[1], &h, 8);
- printf("after write to pipe!\n");
+	  //printf("h received in gct_receiver pthread  = %p\n", h);
+	  write(fd2[1], &h, 8);
+	  //printf("after write to pipe!\n");
 	}
-  }
+    }
 
-
-
-       
-  //   }
   return SUCCESS;
 }
 
@@ -243,15 +248,18 @@ int MAPU_create_msg() {
 
 int MAPU_send_msg(struct order *ptr) {
 
+  MSG *m;
+  u8 *pptr;
+  u16 ptype = 0; /*parameter type */
 /*
    * Allocate a message (MSG) to send:
    */
-  /*
-  if ((m = getm((u16)MAP_MSG_DLG_REQ, dlg_id, NO_RESPONSE, (u16)(7 + dlg_info->ac_len))) != 0)
+  
+  if ((m = getm((u16)ptr->msg_type, ptr->dlg_id, NO_RESPONSE, (u16)(ptr->payload_length))) != 0)
   {
-    m->hdr.src = smsr_mod_id;
-    m->hdr.dst = smsr_map_id;
-  */
+    m->hdr.src = mapu_mod_id;
+    m->hdr.dst = map_mod_id;
+  
     /*
      * Format the parameter area of the message
      *
@@ -264,27 +272,52 @@ int MAPU_send_msg(struct order *ptr) {
      * parameter data   = applic_context
      * EOC_tag
      */
-  /*   pptr = get_param(m);
-    pptr[0] = MAPDT_OPEN_RSP;
+    pptr = get_param(m);
+       /*  pptr[0] = MAPDT_OPEN_RSP;
     pptr[1] = MAPPN_result;
     pptr[2] = 0x01;
     pptr[3] = result;
     pptr[4] = MAPPN_applic_context;
-    pptr[5] = (u8)dlg_info->ac_len;
-    memcpy((void*)(pptr+6), (void*)dlg_info->app_context, dlg_info->ac_len);
-    pptr[6+dlg_info->ac_len] = 0x00; */
+    pptr[5] = (u8)dlg_info->ac_len; */
+    memcpy(pptr, &ptr->payload[0], ptr->payload_length);
+    /*pptr[6+dlg_info->ac_len] = 0x00; */
 
+    ptype = *pptr;
     /*
      * Now send the message
      */
 
+  MAPU_disp_msg("MAPU Tx:", m);
   
-  printf("%s:\n",__PRETTY_FUNCTION__);
+  //printf("%s:\n",__PRETTY_FUNCTION__);
 
+  //GCT_set_instance((unsigned int)instance, (HDR*)m);
+
+  //MTR_trace_msg("MTR Tx:", m);
+
+  /*
+   * Now try to send the message, if we are successful then we do not need to
+   * release the message.  If we are unsuccessful then we do need to release it.
+   */
+
+  //if (GCT_send(m->hdr.dst, (HDR *)m) != 0)
+  //{
+  // if (mtr_trace)
+  //  fprintf(stderr, "*** failed to send message ***\n");
+  // relm((HDR *)m);
+  // }
+
+  /* if message send then we need check should we send DELIMIT or MAP_CLOSE */
+
+  }
+  else
+    printf("getm error!\n");
+
+  
   return 0;
 }
 
-int mapu_dlg_ind(MSG *m)
+int mapu_erl_send(MSG *m)
 {
 
   ETERM *erl_tuple_obj[3];
@@ -305,20 +338,49 @@ int mapu_dlg_ind(MSG *m)
   erl_tuple_obj[1] = erl_mk_uint(ic_dlg_id);
   erl_tuple_obj[2] = erl_mk_binary( pptr, m->len);
 
-  switch (ptype)
-  {
-  case MAPDT_OPEN_IND:
-    erl_tuple_obj[0] = erl_mk_atom("dlg_ind_open");
-    break;
-  default:
-    break;
-  }
+  if  (m->hdr.type == MAP_MSG_DLG_IND)
+    {
+       //	      case MAP_MSG_DLG_IND:
+       //	mapu_dlg_ind(m);
+       //	break;
+		
+       //     case MAP_MSG_SRV_IND:
+       //	mapu_srv_ind(m);
+		//smsrouter_srv_ind(m);
+       //	break;
+       //     }
+      switch (ptype)
+	{
+	case MAPDT_OPEN_IND:
+	  erl_tuple_obj[0] = erl_mk_atom("dlg_ind_open");
+	  break;
+	case MAPDT_DELIMITER_IND:
+	  erl_tuple_obj[0] = erl_mk_atom("delimit_ind");
+	  break;
+	case MAPDT_CLOSE_IND:
+	  erl_tuple_obj[0] = erl_mk_atom("mapdt_close_ind");
+	  break;
+	case MAPDT_OPEN_CNF:
+	  erl_tuple_obj[0] = erl_mk_atom("mapdt_open_cnf");
+	  break;
+
+	default:
+	  break;
+	}
+    }
+  else /*msg type = MAP_MSG_SRV_IND */
+    {
+
+      erl_tuple_obj[0] = erl_mk_atom("srv_ind");
+
+    }
 
    emsg = erl_mk_tuple(erl_tuple_obj, 3);
 
   if (!erl_reg_send(fd, "broker", emsg))
 printf("couldn't send msg to erlang!/n");
-//erl_free_term(emsg);
+  else
+    printf("send msg to erlang\n");
 
 //Q1
 // how to transfer message type - binary, integer or like atom
@@ -345,23 +407,23 @@ int mapu_srv_ind(MSG *m) {
 * send messages to erlang - in main
 **********************************************************************/
 int main() {
-    ErlConnect conn;                         /* Connection data */
+  ErlConnect conn;                         /* Connection data */
   int listen;
   int port = 6666;
   //emsg
   //int fd;
-unsigned char buf[BUFSIZE];              /* Buffer for incoming message */
- ErlMessage emsg1;                         /* Incoming message */
+  unsigned char buf[BUFSIZE];              /* Buffer for incoming message */
+  ErlMessage emsg1;                         /* Incoming message */
 
- struct order *p_order;  
+  struct order *p_order;  
 
 
- MSG *m;
- HDR *h;
+  MSG *m;
+  HDR *h;
  //u16  ic_dlg_id = 0; 
 
- int nbytes;
-
+  int nbytes;
+  
   erl_init(NULL, 0);
 
 
@@ -372,7 +434,7 @@ unsigned char buf[BUFSIZE];              /* Buffer for incoming message */
      fd = erl_connect(ERL_NODE)
      ) < 0)
   //erl_err_quit("erl_connect");
-  fprintf(stderr, "Connected to smsrouter@ubuntu\n\r");  
+  fprintf(stderr, "Error while connecting to erlang\n");  
 
 
   
@@ -405,13 +467,16 @@ int sockfd, creation=1;
 //received by smsrouter
 // p02010d13353706001104970566152009030d133c37080011049705661510000b0906070400000100140300
 
+/* this should be done in test build or something like test
+ 
  unsigned char payload[] ={0x02, 0x01, 0x0d, 0x13, 0x35, 0x37, 0x06, 0x00, 0x11, 0x04, 0x97, 0x05, 0x66, 0x15, 0x20, 0x09, 0x03, 0x0d, 0x13, 0x3c, 0x37, 0x08, 0x00, 0x11, 0x04, 0x97, 0x05, 0x66, 0x15, 0x10, 0x00, 0x0b, 0x09, 0x06, 0x07, 0x04, 0x00, 0x00, 0x01, 0x00, 0x14, 0x03, 0x00 };
 
  unsigned char payload_sri_sm[] = {0x02, 0x0e, 0x01, 0xb5, 0x0f, 0x07, 0x91, 0x97, 0x93, 0x93, 0x43, 0x81, 0xf3, 0x10, 0x01, 0x01, 0x11, 0x07, 0x91, 0x97, 0x05, 0x66, 0x15, 0x10, 0xf0, 0x00};
 
  unsigned char payload_delimit_ind[] = {0x06, 0x00};
  
- unsigned char mtype[] = {2, 4 , 6 , 8};
+*/
+// unsigned char mtype[] = {2, 4 , 6 , 8};
 
  //arr[0] = SELF(sockfd);
 
@@ -424,45 +489,46 @@ int sockfd, creation=1;
  /*
   * map_user will send {Msg_Type, DlgId, BinaryData} to erlang broker
   */
-dlg_ind_tuple[0] = erl_mk_atom("type");
-// arr[1] = erl_mk_atom("map_msg_dlg_ind");
+
+ /*
+ dlg_ind_tuple[0] = erl_mk_atom("type");
 dlg_ind_tuple[1] = erl_mk_atom("dlg_ind");
 
- int id = 64700;
+ int id = 32768;
  id_tuple[0]  = erl_mk_atom("dlg_ind_open");
  id_tuple[1]  =  erl_mk_uint(id);
- 
+ */
 //Q1
 // how to transfer message type - binary, integer or like atom
 //first choice - use atoms
  
- id_tuple[2] = erl_mk_binary( (unsigned char *)&payload, sizeof(payload));
+// id_tuple[2] = erl_mk_binary( (unsigned char *)&payload, sizeof(payload));
 //emsg = erl_mk_binary( &payload[0], sizeof (payload) );
- emsg = erl_mk_tuple(id_tuple, 3);
+// emsg = erl_mk_tuple(id_tuple, 3);
 // TBD - reciever should be changed on broker
-if (!erl_reg_send(fd, "broker", emsg))
-printf("couldn't send msg to erlang!/n");
+//if (!erl_reg_send(fd, "broker", emsg))
+//printf("couldn't send msg to erlang!/n");
 //erl_free_term(emsg);
 
 
 //test sending sri_sm to erlang
-id_tuple[0]  = erl_mk_atom("srv_ind");
- id_tuple[2] = erl_mk_binary( (unsigned char *)&payload_sri_sm[0], sizeof(payload_sri_sm));
+//id_tuple[0]  = erl_mk_atom("srv_ind");
+// id_tuple[2] = erl_mk_binary( (unsigned char *)&payload_sri_sm[0], sizeof(payload_sri_sm));
 
- emsg = erl_mk_tuple(id_tuple, 3);
- if (!erl_reg_send(fd, "broker", emsg))
-printf("couldn't send msg to erlang!/n");
+// emsg = erl_mk_tuple(id_tuple, 3);
+// if (!erl_reg_send(fd, "broker", emsg))
+//printf("couldn't send msg to erlang!/n");
 //erl_free_term(emsg);
 
 
 //test sending delimit_ind to erlang
- id_tuple[0]  = erl_mk_atom("delimit_ind");
-id_tuple[2] = erl_mk_binary( (unsigned char *)&payload_delimit_ind[0], sizeof(payload_delimit_ind));
+// id_tuple[0]  = erl_mk_atom("delimit_ind");
+//id_tuple[2] = erl_mk_binary( (unsigned char *)&payload_delimit_ind[0], sizeof(payload_delimit_ind));
 
 
- emsg = erl_mk_tuple(id_tuple, 3);
- if (!erl_reg_send(fd, "broker", emsg))
-printf("couldn't send msg to erlang!/n");
+// emsg = erl_mk_tuple(id_tuple, 3);
+// if (!erl_reg_send(fd, "broker", emsg))
+//printf("couldn't send msg to erlang!/n");
 //erl_free_term(emsg);
 
 
@@ -543,7 +609,7 @@ struct timeval tv;
       }
     else if (FD_ISSET(fd2[0], &readfds)) /*receive data from gct env */
       {
-	printf("sizeof int = %d\n", sizeof(&h));
+	//printf("sizeof int = %d\n", sizeof(&h));
 	nbytes = read(fd2[0], &h, 8);
 	if (nbytes == -1)
 	  {
@@ -556,8 +622,10 @@ struct timeval tv;
 	
 	if (m != NULL)
 	  {
-	    MAPU_disp_msg("MAPU Rx:", m);
-	    
+	    MAPU_disp_msg("MAPU Rx from GCT:", m);
+
+	    mapu_erl_send(m);
+	    /*
 	    switch (m->hdr.type)
 	      {
 	      case MAP_MSG_DLG_IND:
@@ -569,7 +637,8 @@ struct timeval tv;
 		//smsrouter_srv_ind(m);
 		break;
 	      }
-
+	    */
+	    
         /*
          * Once we have finished processing the message
          * it must be released to the pool of messages.
@@ -585,19 +654,18 @@ struct timeval tv;
     
       }
 
+    //if (!erl_reg_send(fd, "broker", emsg))
+    //printf("couldn't send msg to erlang!/n");
 
-    sleep(5);
-if (!erl_reg_send(fd, "broker", emsg))
-printf("couldn't send msg to erlang!/n");
 
- sleep(15);
-
- if (!erl_reg_send(fd, "broker", emsg))
-printf("couldn't send msg to erlang!/n");
+    //if (!erl_reg_send(fd, "broker", emsg))
+    //printf("couldn't send msg to erlang!/n");
     
 
- erl_free_term(emsg);
-    status = pthread_join(thread, (void**)&status_addr);
+    //erl_free_term(emsg);
+
+
+ status = pthread_join(thread, (void**)&status_addr);
     if (status != SUCCESS) {
         printf("main error: can't join thread, status = %d\n", status);
         exit(ERROR_JOIN_THREAD);

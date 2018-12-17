@@ -25,7 +25,9 @@
 -define(c_node, 'c1@elmir-N56VZ').
 -endif.
 
--record(state, {}).
+-record(state, {o_dialogs}).
+
+-include("gctload.hrl").
 
 %%%===================================================================
 %%% API
@@ -61,8 +63,13 @@ start_link() ->
 			      ignore.
 init([]) ->
     process_flag(trap_exit, true),
+    SeqList = lists:seq(0, 10),
+    Q = queue:from_list(SeqList),
     Result = ets:new(didpid, [set, named_table]),
-    {ok, #state{}}.
+    ets:new(piddid, [set, named_table]),
+    put(sid, 0),
+    State = #state{o_dialogs = Q},
+    {ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -79,6 +86,12 @@ init([]) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
 			 {stop, Reason :: term(), NewState :: term()}.
+handle_call(get_sid, _From, State) ->
+    Sid = get(sid),
+    NewSid = Sid + 1,
+    put(sid, NewSid),
+    {reply, Sid, State};
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -95,8 +108,39 @@ handle_call(_Request, _From, State) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), NewState :: term()}.
 %% receive mapdt_open_rsp from smsrouter_worker
-handle_cast({order, MsgType, PrimitiveType, DlgId, Data}, State)->
-    io:format("send back to c node ~n"),
+handle_cast({Worker, MsgType = ?map_msg_dlg_req, PrimitiveType = ?mapdt_open_req, Data}, State)->
+    io:format("map msg dlg req + mapdt open request ~n"),
+%%    ODlgID = 
+    {{value, ODlgId}, NewQueue} = queue:out(State#state.o_dialogs),
+    NewState = State#state{o_dialogs=NewQueue},
+    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+    ets:insert(didpid, {ODlgId, Worker}),
+    ets:insert(piddid, {Worker, ODlgId}),
+    io:format("didpid = ~p~n",[ets:tab2list(didpid)]),
+    io:format("piddid = ~p~n",[ets:tab2list(piddid)]),
+    {noreply, NewState};
+handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtism_req, Data}, State)->
+    %%io:format("send back to c node ~n"),
+%% TODO!! what about DlgId here!!!!
+    [{_, ODlgId}] = ets:lookup(piddid, Worker),
+    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+%% maybe this is not good idea, but we send delimit automaticaly from broker
+%% alternatives - send delimit from dyn worker or send delimit in C code ?
+    Data2 = list_to_binary([5, 0]),
+    {any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_delimiter_req, ODlgId, Data2},
+    {noreply, State};
+handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtism_rsp, Data}, State)->
+    %%io:format("send back to c node ~n"),
+%% TODO!! what about DlgId here!!!!
+    [{_, ODlgId}] = ets:lookup(piddid, Worker),
+    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+    {noreply, State};
+handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType =?mapst_snd_rtism_rsp, DlgId, Data}, State)->
+    {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
+    {noreply, State};
+
+handle_cast({Worker, MsgType, PrimitiveType, DlgId, Data}, State)->
+    io:format("send back MAP MT FORWARD SM ACK to c node ~n"),
     {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
     {noreply, State};
 handle_cast(_Request, State) ->
@@ -123,14 +167,25 @@ handle_info({dlg_ind_open, DlgId, Data}, State) ->
     {noreply, State};
 
 handle_info({srv_ind, DlgId, Data}, State) ->
+    io:format("srv ind received in broker with DlgId = ~p~n",[DlgId]),
     [{_, Pid}] = ets:lookup(didpid, DlgId),
     gen_server:cast(Pid, {srv_ind, Data}),
     {noreply, State};
 
 handle_info({delimit_ind, DlgId, Data}, State) ->
+    io:format("Receive delimit ind in broker~n"),
     [{_, Pid}] = ets:lookup(didpid, DlgId),
     gen_server:cast(Pid, {delimit_ind, Data}),
     {noreply, State};
+
+handle_info({mapdt_close_ind, DlgId, Data}, State) ->
+    io:format("Receive mapdt_close_ind in broker~n"),
+    [{_, Pid}] = ets:lookup(didpid, DlgId),
+    io:format("mapdt close ind in broker received: Pid = ~p, DlgId = ~p ~n",[Pid, DlgId]),
+    gen_server:cast(Pid, {mapdt_close_ind, Data}),
+    {noreply, State};
+
+
 
 
 handle_info(_Info, State) ->
