@@ -67,7 +67,21 @@ init([]) ->
     Q = queue:from_list(SeqList),
     Result = ets:new(didpid, [set, named_table]),
     ets:new(piddid, [set, named_table]),
-    put(sid, 0),
+%%cid  - correlation id, like fake imsi
+%%tp_da - forwarded to number
+%%sm_rp_oa - originating address digits in MO_SUBMIT_SM, msisdn of subscriber
+    ets:new(cid, [set, public, named_table]),  %% for {cid, sm_rp_oa, tp_da}
+%%for {msisdn, tp_da}
+% msisdn = << 16#91, 97, 93, 93, ....>>
+% tp_da = << 16#0b, 16#91, 97, 15, 60, 52, 55, f5>>
+    ets:new(subscribers, [set, named_table]),
+    ets:insert(subscribers, {<<16#91, 16#97, 16#93, 16#93, 16#43, 16#81, 16#f3>>,
+			     <<16#0b, 16#91, 16#97, 16#15, 16#60, 16#52, 16#55, 16#f5>>}),
+    ets:insert(subscribers, {<<16#91, 16#97, 16#80, 16#33, 16#47, 16#33, 16#f9>>,
+			     <<16#0b, 16#91, 16#97, 16#06, 16#30, 16#05, 16#00, 16#f0>>}),
+
+
+    put(cid, 250270000000000),
     State = #state{o_dialogs = Q},
     {ok, State}.
 
@@ -86,11 +100,11 @@ init([]) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
 			 {stop, Reason :: term(), NewState :: term()}.
-handle_call(get_sid, _From, State) ->
-    Sid = get(sid),
-    NewSid = Sid + 1,
-    put(sid, NewSid),
-    {reply, Sid, State};
+handle_call(get_cid, _From, State) ->
+    Cid = get(cid),
+    NewCid = Cid + 1,
+    put(cid, NewCid),
+    {reply, Cid, State};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -126,6 +140,7 @@ handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtis
     {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
 %% maybe this is not good idea, but we send delimit automaticaly from broker
 %% alternatives - send delimit from dyn worker or send delimit in C code ?
+%% solution - use special parameter then no need for delim req or close req
     Data2 = list_to_binary([5, 0]),
     {any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_delimiter_req, ODlgId, Data2},
     {noreply, State};
@@ -135,9 +150,31 @@ handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtis
     [{_, ODlgId}] = ets:lookup(piddid, Worker),
     {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
     {noreply, State};
+handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_mo_fwd_sm_req, Data}, State)->
+    io:format("send mo fwd sm req to c node ~n"),
+%% TODO!! what about DlgId here!!!!
+    [{_, ODlgId}] = ets:lookup(piddid, Worker),
+    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+    {noreply, State};
+
+%%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+%%TODO - dyn worker doesnt send CLOSE DLG, we send it from Broker,
+%% need to anaylize if it possible to send close directly from C code????
 handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType =?mapst_snd_rtism_rsp, DlgId, Data}, State)->
     {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
+    %%Data2 = list_to_binary([5, 0]),
+    %%{any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_close_req, DlgId, Data2},
+
     {noreply, State};
+
+handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType =?mapst_mt_fwd_sm_rsp, DlgId, Data}, State)->
+    {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
+    %%Data2 = list_to_binary([5, 0]),
+    %%{any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_close_req, DlgId, Data2},
+
+    {noreply, State};
+
+
 
 handle_cast({Worker, MsgType, PrimitiveType, DlgId, Data}, State)->
     io:format("send back MAP MT FORWARD SM ACK to c node ~n"),
@@ -166,6 +203,13 @@ handle_info({dlg_ind_open, DlgId, Data}, State) ->
     gen_server:cast(Pid, {dlg_ind_open, Data}),
     {noreply, State};
 
+handle_info({mapdt_open_cnf, DlgId, Data}, State) ->
+    io:format("Receive dialog confirmation in broker~n"),
+    [{_, Pid}] = ets:lookup(didpid, DlgId),
+    gen_server:cast(Pid, {mapdt_open_cnf, Data}),
+    {noreply, State};
+
+
 handle_info({srv_ind, DlgId, Data}, State) ->
     io:format("srv ind received in broker with DlgId = ~p~n",[DlgId]),
     [{_, Pid}] = ets:lookup(didpid, DlgId),
@@ -183,7 +227,13 @@ handle_info({mapdt_close_ind, DlgId, Data}, State) ->
     [{_, Pid}] = ets:lookup(didpid, DlgId),
     io:format("mapdt close ind in broker received: Pid = ~p, DlgId = ~p ~n",[Pid, DlgId]),
     gen_server:cast(Pid, {mapdt_close_ind, Data}),
-    {noreply, State};
+    Q=State#state.o_dialogs,
+    NewQueue = queue:in(DlgId, Q),
+    NewState = State#state{o_dialogs=NewQueue},
+    %%ets:delete(didpid, DlgId),
+    %%ets:delete(piddid, Pid),
+
+    {noreply, NewState};
 
 
 

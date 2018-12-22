@@ -79,7 +79,35 @@
 -module(sm_rp_ui).
 
 -export([get_oa/1,
-	test/0]).
+	 test/0,
+	 test2/0,
+	 test3/0,
+	 parse/1,
+	 create_sms_submit/2]).
+
+-record(sm_rp_ui, {
+		   message_type,
+		   mti,
+		   mms,
+		   rp,
+		   lp,      %%loop prevention
+		   udhi,
+		   sri,
+		   srr,
+		   vpf,
+		   rd,
+		   oa_length, %%0x0b
+		   oa_type, %%0x91
+		   oa_data, %%9720171182f7
+		   oa_raw,  %%0b919720171182f7
+		   pid,
+		   dcs,
+		   scts,
+		   udl,
+		   ud}).
+
+-define(sms_deliver, 0).
+-define(sms_submit, 1).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -87,6 +115,89 @@
 %% @end
 %%--------------------------------------------------------------------
 
+%% input - binary sm_rp_ui
+%% output - sms_deliver record 
+parse(Sm_rp_ui)->
+
+    <<Flags:8, Rest/binary>> = Sm_rp_ui,
+    
+    %%[Rp, Udhi, Sri, Lp, Mms, Mti] = parse_flags(Flags),
+    <<_Rest:6, Mti:2>> = <<Flags>>,
+    case Mti of
+	?sms_deliver ->
+	    [Rp, Udhi, Sri, Lp, Mms] = parse_flags(sms_deliver, Flags),
+	    %%[Rp, Udhi, Sri, Lp, Mms, Mti] = parse_flags(Flags),
+	    Obj = parse_sms_deliver(Rest),
+	    NewObj = Obj#sm_rp_ui{rp=Rp,
+				  udhi = Udhi,
+				  sri = Sri,
+				  lp = Lp,
+				  mms = Mms,
+				  mti = Mti};
+	?sms_submit ->
+	    [Rp, Udhi, Srr, Vpf, Rd] = parse_flags(sms_submit, Flags),
+	    Obj = parse_sms_submit(Rest),
+	    NewObj = Obj#sm_rp_ui{rp=Rp,
+				  udhi = Udhi,
+				  srr = Srr,
+				  vpf = Vpf,
+				  rd = Rd,
+				  mti = Mti};
+	_Other -> 
+	    NewObj = error
+    end,
+
+    io:format("sms deliver = ~w~n", [NewObj]),
+    NewObj.
+
+
+parse_sms_deliver(Data)->
+    
+
+    <<OAlength:8, OAtype:8, Rest/binary>> = Data,
+
+    case OAtype of
+	16#91 ->
+	    {Oa_data, Tail} = decode_numeric_oa(OAlength, Rest);
+	16#d0 -> %%alphanumeric oa field
+	    {Oa_data, Tail} = decode_alphanum_oa(OAlength, Rest);
+	Other -> 
+	    {Oa_data,Tail} = decode_oa_carefully(Other, OAlength, Rest)
+    end,
+
+%%Slen = 56,
+%% Scts - 7 octets
+<< Pid:8, Dcs:8, Scts:7/binary, Udl:8, Ud/binary >>  = Tail,
+%%<<Scts:7/binary, R2/binary >> = R,
+%%<< Udl:8, Ud/binary >> = R2,
+
+    Out = #sm_rp_ui{message_type = sms_deliver,
+		       oa_data = Oa_data,
+		       oa_length = OAlength,
+		       oa_type = OAtype,
+		       pid = Pid,
+		       dcs = Dcs,
+		       scts = Scts,
+		       udl = Udl,
+		       ud = Ud}.
+
+%%io:format("sms deliver = ~w~n", [Out]).
+
+parse_flags(sms_deliver, Flags)->
+    <<Rp:1, Udhi:1, Sri:1, _Reserved:1, Lp:1,  Mms:1, _Rest:2>> = <<Flags>>,
+    %%<<Rest:6, Mti:2>> = <<Flags>>,
+%%case Mti of
+      [Rp, Udhi, Sri, Lp, Mms];
+parse_flags(sms_submit, Flags)->
+    <<Rp:1, Udhi:1, Srr:1, Vpf:2,  Rd:1, _Rest:2>> = <<Flags>>,
+    %%<<Rest:6, Mti:2>> = <<Flags>>,
+%%case Mti of
+      [Rp, Udhi, Srr, Vpf, Rd].
+
+
+
+parse_sms_submit(Data)->
+    ok.
 
 get_oa(Data)->
     <<MTI:8, OAlength:8, OAtype:8, Rest/binary>> = Data,
@@ -96,24 +207,104 @@ get_oa(Data)->
 	Other -> decode_oa_carefully(Other, OAlength, Rest)
     end.
 
+
+%% output - {binary(), binary()}
 %% even number of address digits
 decode_numeric_oa(Length, Data) when (( Length band 1) == 0)->
     OAnum_bytes = Length div 2,
-    << OA:OAnum_bytes, _Rest/binary >> = Data,  
-    OA;
+    << OA:OAnum_bytes, Rest/binary >> = Data,  
+    {OA, Rest};
 %% odd numbers of addres digits(ex. 0x0b)
 decode_numeric_oa(Length, Data) ->
     OAnum_bytes = (Length+1) div 2,
 %%    io:format("num bytes = ~p~n", [OAnum_bytes]),
-    << OA:OAnum_bytes/binary, _Rest/binary >> = Data,  
-    OA.
+    << OA:OAnum_bytes/binary, Rest/binary >> = Data,  
+    {OA, Rest}.
 
 decode_oa_carefully(_Type,_Length,_Rest)->
     ok.
- 
+%%for even number of semioctets of gsm7bit coded OA 
+decode_alphanum_oa(Length, Data) when (( Length band 1) == 0) ->
+    OAnum_bytes = Length div 2,
+    << OA:OAnum_bytes, Rest/binary >> = Data,  
+    {OA, Rest};
+decode_alphanum_oa(Length, Data)->
+    OAnum_bytes = (Length+1) div 2,
+%%    io:format("num bytes = ~p~n", [OAnum_bytes]),
+    << OA:OAnum_bytes/binary, Rest/binary >> = Data,  
+    {OA, Rest}.
+
 
 even(X) when X >= 0 -> (X band 1) == 0.
 odd(X) when X > 0 -> not even(X).
+
+%% TP-DA should be argument for this function!
+%% get it in some previous state!!
+%% output - binary
+create_sms_submit(Sms_deliver, Tp_da)->
+
+    %%Sms_deliver = get(sms_deliver),
+    %%Sms_deliver = test2(),
+
+case Sms_deliver#sm_rp_ui.oa_type of
+    16#91->
+	MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
+	List = [ [0, 48 + Digit] || Digit <- MsisdnDigits, Digit < 10],
+	io:format("List = ~w~n", [lists:flatten(List)]),
+	UDPrefix = lists:flatten(List) ++ [0,58,0,32],
+	%%PrefixLength = length(UDPrefix),
+	io:format("ud = ~p, udl = ~p ~n", [Sms_deliver#sm_rp_ui.ud, Sms_deliver#sm_rp_ui.udl]),
+	{UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
+		       8 ->
+			   modify_user_data(UDPrefix,
+					    Sms_deliver#sm_rp_ui.udl,
+					    Sms_deliver#sm_rp_ui.ud,
+					    Sms_deliver#sm_rp_ui.udhi
+					   );
+		       _Other ->
+			   {Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud}
+		   end;
+     16#d0->
+	{UDL,UD} ={Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud}
+end,
+
+io:format("sms deliver = ~w~n", [Sms_deliver]),
+    case Sms_deliver#sm_rp_ui.udhi of
+	1->
+	    Flags = 16#51;
+	0 ->
+	    Flags = 16#11
+    end,
+    Bin0 = <<Flags>>,
+    Mr=202,
+%%Pid = Sms_deliver#sm_rp_ui.pid,
+    Bin2 = <<Bin0/binary, Mr >>,
+    Da = list_to_binary(Tp_da),
+    Bin3 = << Bin2/binary, Da/binary >>,    
+    Bin4 = << Bin3/binary, (Sms_deliver#sm_rp_ui.pid) >>,
+    Bin5 = << Bin4/binary, (Sms_deliver#sm_rp_ui.dcs) >>,
+    Bin6 = << Bin5/binary, 255 >>,
+    Bin7 = << Bin6/binary, UDL:8 >>,
+    Bin8 = << Bin7/binary, UD/binary>>,
+io:format("sm rp ui itog = ~p~n",[Bin8]),
+    Bin8.
+
+
+
+modify_user_data(UDPrefix, Udl, Ud, Udhi)->
+    case Udhi of
+	0 ->
+	    Length = length(UDPrefix),   
+	    if Length + Udl < 140 ->
+		    {Length + Udl,
+		     list_to_binary(UDPrefix ++ binary_to_list(Ud))};
+	       true ->
+		   {Udl, Ud}
+	    end; 
+	1 ->
+	    {Udl, Ud}
+    end.
+
 
 
 test()->
@@ -122,3 +313,18 @@ test()->
 	      16#04, 16#22, 16#04, 16#35, 16#04, 16#41, 16#04, 16#42 >>,
     << 16#97, 16#20, 16#17, 16#11, 16#82, 16#f7 >> = get_oa(Data),
     ok.
+
+test2()->
+    Data = << 16#24, 16#0b, 16#91, 16#97, 16#20,
+	     16#17, 16#11, 16#82, 16#f7, 16#00,
+	     16#08, 16#81, 16#90, 16#12, 16#00,
+	     16#53, 16#23, 16#21, 16#08, 16#04,
+	     16#22, 16#04, 16#35, 16#04, 16#41,
+	     16#04, 16#42 >>,
+    parse(Data).
+
+test3() ->
+    Sms_deliver = test2(),
+    Tp_da = [11,145,151,21,96,82,85,245],
+    Out = create_sms_submit(Sms_deliver, Tp_da),
+    io:format("out = ~p~n", [Out]).

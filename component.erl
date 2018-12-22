@@ -43,7 +43,12 @@ parse_service_data([?mappn_invoke_id | [Length | T]]) ->
     parse_service_data(Out);
 parse_service_data([?mappn_msisdn | [Length | T]]) ->
     Msisdn = lists:sublist(T, 1, Length ),
+    io:format("Msisdn in parse service data = ~p~n", [Msisdn]),
+    [{_, Tp_da}] = ets:lookup(subscribers, list_to_binary(Msisdn)),
+    Sm_rp_oa = << Length, (list_to_binary(Msisdn))/binary >>,
+    put(sm_rp_oa, Sm_rp_oa),
     put(msisdn, Msisdn),
+    put(tp_da, Tp_da),
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
 parse_service_data([?mappn_sm_rp_pri | [Length | T]]) ->
@@ -76,14 +81,23 @@ parse_service_data([?mappn_sm_rp_da | [Length | T]]) ->
     put(sm_rp_da, Sm_rp_da),
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
+parse_service_data([?mappn_user_err | [Length | T]]) ->
+    User_err = lists:sublist(T, 1, Length ),
+    put(user_err, User_err),
+    Out = lists:nthtail(Length, T),
+    parse_service_data(Out);
 parse_service_data([?mappn_sm_rp_oa | [Length | T]]) ->
     Sm_rp_oa = lists:sublist(T, 1, Length ),
     put(sm_rp_oa, Sm_rp_oa),
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
-parse_service_data([?mappn_more_msgs | [Length | T]]) ->
+parse_service_data([?mappn_more_msgs | [_Length | T]]) ->
     More_msg = 1,
     put(more_msg, More_msg),
+    %%Out = lists:nthtail(Length, T),
+    parse_service_data(T);
+parse_service_data([?mappn_gprs_support_ind | [_Length | T]]) ->
+    put(gprs_support_ind, 1),
     %%Out = lists:nthtail(Length, T),
     parse_service_data(T);
 

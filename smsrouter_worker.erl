@@ -46,8 +46,13 @@
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
 -define(ac_name, 11).
--define(dummy_dest, [16#12, 16#06, 0, 16#11, 16#04, 16#97, 16#15, 16#60, 16#52, 16#55, 16#05]).
--define(smsr_sccp_gt, [16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#09]).
+-define(dummy_dest, [16#0b, 16#12, 16#06, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#0]).
+-define(smsr_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#09]).
+-define(smsc_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#10, 0]).
+
+%%used in MO_FORWARD_SM, actually SMSC
+%%with type at the beginning
+-define(sm_rp_da, [16#17, 16#09, 16#04, 16#07, 16#91, 16#97, 16#05, 16#66, 16#15, 16#10, 16#f0]).
 %% -define(mappn_applic_context, 16#0b).
 
 -record(state, {}).
@@ -130,7 +135,7 @@ handle_call(_Request, _From, State) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), NewState :: term()}.
 handle_cast({dlg_ind_open, Request}, State) ->
-    io:format("received dlg ind open smsr worker ~p~n",[Request]),
+    io:format("[~p]receive dlg ind open smsr worker ~p~n",[self(),Request]),
     %%io:format("i have state already ~p~n", [State]),
     parse_data(binary:bin_to_list(Request)),
     io:format("sccp_calling from PD = ~p~n",[get(sccp_calling)]),
@@ -143,12 +148,25 @@ handle_cast({dlg_ind_open, Request}, State) ->
 %% {mapdt_open_rsp, DlgId, BinaryData}
 %% should construct payload like this
 %%  p810501000b0906070400000100140300
-    Payload = create_map_open_rsp_payload(),
-    DlgId = State#dialog.dlg_id,
-
-    gen_server:cast(broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
+%% send open_resp after delimit ind received!!
+%%    Payload = create_map_open_rsp_payload(),
+%%    DlgId = State#dialog.dlg_id,
+%%    gen_server:cast(broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
 
     {noreply, State};
+
+handle_cast({mapdt_open_cnf, Request}, State) ->
+
+ %%   case get(flag) of
+%%	undefined ->
+%%	    do_nothing;
+%%	1 ->   
+%%	    io:format("in mo_forward_sm_req function after cast ~n"),
+	   %% io:format("sm rp oa ~p and tp da ~p in mo forward sm req ~n", [Sm_Rp_Oa, Tp_Da]),
+%%	    Payload2 = mo_forwardSM(get(smrpoa),get(tpda)),
+%%	    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload2)})
+  %%  end,
+        {noreply, State};
 
 handle_cast({srv_ind, Request}, State) ->
     io:format("srv_ind received ~n"),
@@ -165,18 +183,39 @@ handle_cast({delimit_ind, Request}, State) ->
 %% TODO - we receive delimit and we should analyze what kind of component we recevied bevoe in SRV_IND
 %% component should be saved in State like component list
 %% Payload here should be like
+    Payload = create_map_open_rsp_payload(),
+    DlgId = State#dialog.dlg_id,
+    gen_server:cast(broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
+
     case component:handle_service_data(State#dialog.components) of
 	?mapst_snd_rtism_ind ->
 	    io:format("stay before send sri sm req ~n"),
-	    Sid = get_sid(),
+	    Cid = get_cid(),
+	    Msisdn = get(msisdn),
+	    [{_, Tp_da}] = ets:lookup(subscribers, list_to_binary(Msisdn)),
+	    ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, binary_to_list(Tp_da)}),
 	    %% update_sid(),
 	    %% CorrealatioId = fake IMSI
-	    CorrelationId = 250270900000000 + Sid,
-	    put(correlationid, CorrelationId),
+	    %%CorrelationId = 250270900000000 + Sid,
+	    put(cid, Cid),
 	    sri_sm_req(State#dialog.components);
 	?mapst_mt_fwd_sm_ind ->
 	    io:format("stay before send mt forward sm ack ~n"),
-	    mt_forward_sm_ack(State#dialog.dlg_id);
+	    mt_forward_sm_ack(State#dialog.dlg_id),
+	    Sm_rp_da = get(sm_rp_da),
+	    [_Type | [Length | Imsi  ]] = Sm_rp_da,
+	    %%ImsiL = bcd:decode(imsi, list_to_binary(Imsi)),
+	    [{_Cid, Sm_rp_oa, Tp_da}] = ets:lookup(cid, list_to_binary(Imsi)),
+	    mo_forward_sm_req(Sm_rp_oa, Tp_da),
+	io:format("stay after mo forward sm~n");
+	?mapst_fwd_sm_ind -> %%smsc use mapv2 forward_sm instead of mt forward sm
+	    forward_sm_ack(State#dialog.dlg_id),
+	    Sm_rp_da = get(sm_rp_da),
+	    [_Type | [Length | Imsi  ]] = Sm_rp_da,
+	    %%ImsiL = bcd:decode(imsi, list_to_binary(Imsi)),
+	    [{_Cid, Sm_rp_oa, Tp_da}] = ets:lookup(cid, list_to_binary(Imsi)),
+	    mo_forward_sm_req(Sm_rp_oa, Tp_da),
+	    io:format("stay after mo forward sm~n");
 	_Other->
 	    io:format("suddenly true ~n"),
 	    true
@@ -196,7 +235,10 @@ handle_cast({mapdt_close_ind, Request}, State) ->
 
     case component:handle_service_data(State#dialog.components) of
 	?mapst_snd_rtism_cnf -> sri_sm_ack(State#dialog.components, State#dialog.dlg_id);
-	_Other->true
+	?mapst_mo_fwd_sm_cnf -> mo_fwd_sm_cnf();
+	_Other->
+	    io:format("!!!!!!!!!!!!!!!!!!!!!!!!!1unexpected error ~n"),
+	    true
     end,
 
 
@@ -283,8 +325,8 @@ io:format("in srim sm req function after cast ~n"),
 %%% also in this function we should change trueIMSI to Correlationid
 sri_sm_ack(Components, DlgId)->
 %%    Payload = map_msg_srv_req(),
-    CorrelationId = get(correlationid),
-    Fimsi= bcd:encode(imsi, CorrelationId),
+    Cid = get(cid),
+    Fimsi= bcd:encode(imsi, Cid),
     Payload = construct_sri_sm_ack(Fimsi),
 %%    Payload x= [16#81,  16#0e, 16#01, 16#b5,   16#12, 16#08, 16#52, 16#20,
 %%	       16#07, 16#01, 16#30, 16#43, 16#77, 16#f7,  16#13, 16#07,
@@ -302,7 +344,8 @@ construct_sri_sm_ack(Imsi)->
     ImsiParam = [?mappn_imsi, 16#08] ++  binary_to_list(Imsi),
 %%smsr gt as smsc, we need to intercept mt sms
     Other = [16#13, 16#07, 16#91, 16#97, 16#05,
-	     16#66, 16#15, 16#20, 16#f9, 16#00],
+	     16#66, 16#15, 16#20, 16#f9] ++
+	[?mappn_dialog_type,1,?mapdt_close_req, ?mappn_release_method, 1, 0, 0],
     [?mapst_snd_rtism_rsp] ++ InvokeId ++ ImsiParam ++ Other.
 
 
@@ -314,11 +357,28 @@ mt_forward_sm_ack(DlgId)->
 %%    CorrelationId = get(correlationid),
 %%    Fimsi= bcd:encode(imsi, CorrelationId),
 %%    Payload = construct_sri_sm_ack(Fimsi),
-    Payload = [?mapst_mt_fwd_sm_rsp,
-	       16#0e, 16#01, 16#b5,
-	       ?mappn_sm_rp_ui, 16#02, 16#0, 16#0,
-	       16#00],
+    Invoke = get(invoke_id),
+    InvokeId = [?mappn_invoke_id, 1] ++ Invoke,
+
+    Payload = [?mapst_mt_fwd_sm_rsp] ++ InvokeId ++
+	[?mappn_sm_rp_ui, 16#02, 16#0, 16#0,
+	 ?mappn_dialog_type, 1, ?mapdt_close_req, ?mappn_release_method, 1, 0, 16#00],
     gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_mt_fwd_sm_rsp, DlgId, list_to_binary(Payload)}).
+
+
+forward_sm_ack(DlgId)->
+%%    Payload = map_msg_srv_req(),
+%%    CorrelationId = get(correlationid),
+%%    Fimsi= bcd:encode(imsi, CorrelationId),
+%%    Payload = construct_sri_sm_ack(Fimsi),
+    Invoke = get(invoke_id),
+    InvokeId = [?mappn_invoke_id, 1] ++ Invoke,
+
+    Payload = [?mapst_fwd_sm_rsp] ++ InvokeId ++
+	       %%16#0e, 16#01, 16#01,   %%invoke_id   
+	       %%?mappn_sm_rp_ui, 16#02, 16#0, 16#0,
+	       [?mappn_dialog_type, 1, ?mapdt_close_req, ?mappn_release_method, 1, 0,  16#00],
+    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_fwd_sm_rsp, DlgId, list_to_binary(Payload)}).
 
 
 
@@ -326,11 +386,24 @@ mt_forward_sm_ack(DlgId)->
 %%%
 %%% smsrouter act as MSC sending MO FORWARD SM to SMS
 
-mo_forward_sm_req()->
+mo_forward_sm_req(Sm_Rp_Oa, Tp_Da)->
+    io:format("in mo_forward_sm_req function ~n"),
+    Payload = create_map_open_req_payload2(),
+    gen_server:cast(broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
+%% payload here
+
+    put(smrpoa, Sm_Rp_Oa),
+    put(tpda, Tp_Da),
+    %%put(flag,1),
     
+    io:format("in mo_forward_sm_req function after cast ~n"),
+    io:format("sm rp oa ~p and tp da ~p in mo forward sm req ~n", [Sm_Rp_Oa, Tp_Da]),
+    Payload2 = mo_forwardSM(Sm_Rp_Oa, Tp_Da),
+    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload2)}).
 
-ok.
-
+mo_fwd_sm_cnf()->
+    io:format("mo forward sm returned result!~n"),
+    io:format("user err = ~p~n", get(user_err)).
 
 %% parse binary data received from C node
 %% this is for received mapdt_dlg_ind received from C node
@@ -396,7 +469,8 @@ create_map_open_rsp_payload(List, terminator) ->
 %% 010b 1206001104970566152000 destination address
 %% 030b 1208001104970566152009 originating address
 %% 00                         terminator
-
+%% this part is for sending SRI_SM request to HLR
+%% first we need to send OPEN_DLG command to MAP
 create_map_open_req_payload()->
     create_map_open_req_payload([?mapdt_open_req], mappn_applic_context).
 create_map_open_req_payload(List, mappn_applic_context) ->
@@ -409,6 +483,38 @@ create_map_open_req_payload(List, sccp_calling) ->
     List2 = List ++ [?mappn_orig_address] ++ ?smsr_sccp_gt,
     List2 ++ [0].
 
+
+%% this part is for sending MO_FORWARD_SM request to HLR
+%% first we need to send OPEN_DLG command to MAP
+%% TODO - construct one fucntion from two, remove magics
+%% and other
+
+create_map_open_req_payload2()->
+    create_map_open_req_payload2([?mapdt_open_req], mappn_applic_context).
+create_map_open_req_payload2(List, mappn_applic_context) ->
+    List2 = List ++ [?mappn_applic_context] ++ [9, 6, 7, 4, 0, 0, 1, 0, 16#15, 3],
+    create_map_open_req_payload2(List2, sccp_called);
+create_map_open_req_payload2(List, sccp_called) ->
+    List2 = List ++ [?mappn_dest_address] ++ ?smsc_sccp_gt, 
+    create_map_open_req_payload2(List2, sccp_calling);
+create_map_open_req_payload2(List, sccp_calling) ->
+    List2 = List ++ [?mappn_orig_address] ++ ?smsr_sccp_gt,
+    List2 ++ [0].
+
+%% function to construct submit sm payload
+%% invoke id + sm rp da + sm rp oa + sm rp ui
+%% input arg msisdn is list with 0x91 at head
+mo_forwardSM(Msisdn, Tp_Da)->
+    InvokeId = [?mappn_invoke_id, 1, 1],
+    Sm_rp_da = [16#17, 16#09, 16#04, 16#07, 16#91, 16#97, 16#05, 16#66, 16#15, 16#10, 16#f0],
+    Sm_rp_oa = [16#18, 16#09, 16#02, 16#07] ++ Msisdn,
+    Sm_rp_uiB = list_to_binary(get(sm_rp_ui)),
+    Sms_deliver = sm_rp_ui:parse(Sm_rp_uiB),
+    Sm_rp_ui = sm_rp_ui:create_sms_submit(Sms_deliver, Tp_Da),
+    Sm_rp_ui_length = byte_size(Sm_rp_ui),
+    [?mapst_mo_fwd_sm_req] ++ InvokeId ++ Sm_rp_da ++ Sm_rp_oa ++ [?mappn_sm_rp_ui, Sm_rp_ui_length] ++
+	binary_to_list(Sm_rp_ui) ++
+	[?mappn_dialog_type, 1, ?mapdt_delimiter_req, 0].
 
 %% parsing received srv_ind data from C node
 %%parse_srv_data([?mapst_snd_rtism_ind | T]) ->
@@ -439,10 +545,16 @@ create_map_open_req_payload(List, sccp_calling) ->
 -spec map_srv_req_primitive( atom(),[binary()] ) -> binary().
 map_srv_req_primitive(snd_rtism_req, Components)->
     [Component] = Components,
-    Component.
-    
+    %%should remove last 0 from binary
+    %%New = binary_part(Component, {0, byte_size(Component)-1}),
+    %%Out = <<New/binary, ?mappn_dialog_type, 1, ?mapdt_delimiter_req,0>>,
+    %%io:format("Out = ~p~n", [Out]),
+    %%Out.
+    <<_First:8, Rest/binary>> = Component,
+    Out = << ?mapst_snd_rtism_req, Rest/binary, ?mappn_dialog_type, 1 , ?mapdt_delimiter_req, 0>>,
+    Out.
 
-get_sid()->
-    gen_server:call(broker, get_sid).
+get_cid()->
+    gen_server:call(broker, get_cid).
 
     

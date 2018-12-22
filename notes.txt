@@ -194,6 +194,8 @@ p81 MAP-SEND-ROUTING-INFO-FOR-SM-RSP MAPST_SND_RTISM_RSP 129 0x81
 
 S7L:2018-09-21 11:16:42.919 map msg dlg req  tc7e2 i8000 f2e d15 s00 p0307010000 - map dt close req
 
+p0307010000
+
 *************************************************************************************************************
 MAP MT FORWARD SM incoming to SMSR
 //here SMSR receive MAP MT FORWARD SM
@@ -214,7 +216,7 @@ More Messages To Send MAPPN_more_msgs 26 0x1a 00
 00 - terminator
 
 Short Message Destination
-Address MAPPN_sm_rp_da 23 0x17
+Address MAPPN_sm_rp_da 23 0x17 170a000852200701304377f7 00 imsi 08 number of octets
 
 Short Message Originating
 Address MAPPN_sm_rp_oa 24 0x18
@@ -230,6 +232,27 @@ S7L:2018-09-21 11:16:42.958 I0000 T E00000021 M tc7e2 i8001 f2e d15 s00 p8105010
 
 After MAP MT FORWARD SM ACK send then SMSR should send MO FORWARD SM to SMSC!!
 
+******MO_SUBMIT SM EXAMPLE
+
+S7L:2018-12-18 14:02:07.719 I0000 T E00000143 M tc7e2 i0000 f2d d15 s00 p010b09060704000001001902 010b1208001104970566151000 030b120800110497056615200000
+
+
+
+S7L:2018-12-18 14:02:07.721 I0000 T E00000143 M tc7e0 i0000 f2d d15 s00 p03 0e010
+1 17090407919705661510f0 18090207919793934336f1 191135250b916191126246f90000ff03771
+d002d023c0000
+
+17090407919705661510f0 - sm rp da 04 - smsc, 07 - number of following octets
+18090207919793934336f1 - sm rp oa 02 - msisdn, 07 - number of following octets
+
+191135250b916191126246f90000ff03771
+d002d023c0000 - smrpui
+
+
+S7L:2018-12-18 14:02:07.721 I0000 T E00000143 M tc781 i0000 f15 d14 s00 p0803010
+10402003c012fa12d02010102012e30258407919705661510f08207919793934336f1041135250b9
+16191126246f90000ff03771d0000
+S7L:2018-12-18 14:02:07.723 I0000 T E00000143 M tc7e2 i0000 f2d d15 s00 p0500
 
 
 
@@ -277,5 +300,20 @@ Application context name: { 0 4 0 0 1 0 25 3 }
 Initiator may invoke:
 MAPOperations.mt_ForwardSM
 
+
+for MO submit SM from SMSR to SMSC
+
+shortMsgMO_RelayContext_v2_ac
+public static final TcapApplicationContext shortMsgMO_RelayContext_v2_ac
+Metadata for application context used for for mobile originating short message relay procedures. Present in ph2.
+Application context name: { 0 4 0 0 1 0 21 2 }
+Initiator may invoke:
+MAPOperations.forwardSM
+shortMsgMO_RelayContext_v3_ac
+public static final TcapApplicationContext shortMsgMO_RelayContext_v3_ac
+Metadata for application context used between MSC and IWMSC or between SGSN and IWMSC for mobile originating short message relay procedures. For the SGSN - IWMSC interface version 1, version 2 and version 3 of this application context are applicable. Responder is IWMSC if Initiator is MSC. Responder is IWMSC if Initiator is SGSN. Added in R96.
+Application context name: { 0 4 0 0 1 0 21 3 }
+Initiator may invoke:
+MAPOperations.mo_ForwardSM
 
 ********************************************************************************************************

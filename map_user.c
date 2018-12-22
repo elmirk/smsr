@@ -59,7 +59,7 @@
 int fd1[2];//File descriptor for creating a pipe
 int fd2[2];//File descriptor for creating a pipe
 
-#define BUFSIZE 1000
+#define BUFSIZE 1024
 #define SELF(fd) erl_mk_pid(erl_thisnodename(),fd,0,erl_thiscreation())
 
 
@@ -88,7 +88,7 @@ struct order {
   unsigned int primitive_type;
   int dlg_id;
   unsigned char payload_length;
-  unsigned char payload[64];
+  unsigned char payload[512];
 
 } order;
 
@@ -169,7 +169,7 @@ unsigned char buf[BUFSIZE];              /* Buffer for incoming message */
      }
      else if (emsg1.type == ERL_REG_SEND)
        {
-	 printf("receive PAYLOAD from erlang\n");	 
+	 //	 printf("receive PAYLOAD from erlang\n");	 
 	     msg_type = erl_element(1, emsg1.msg);
 	     primitive_type = erl_element(2, emsg1.msg);
 	     dlg_id = erl_element(3, emsg1.msg);
@@ -299,14 +299,14 @@ int MAPU_send_msg(struct order *ptr) {
    * Now try to send the message, if we are successful then we do not need to
    * release the message.  If we are unsuccessful then we do need to release it.
    */
-
-  //if (GCT_send(m->hdr.dst, (HDR *)m) != 0)
-  //{
-  // if (mtr_trace)
-  //  fprintf(stderr, "*** failed to send message ***\n");
-  // relm((HDR *)m);
-  // }
-
+  
+  if (GCT_send(m->hdr.dst, (HDR *)m) != 0)
+   {
+   if (mapu_trace)
+    fprintf(stderr, "*** failed to send message ***\n");
+   relm((HDR *)m);
+   }
+  
   /* if message send then we need check should we send DELIMIT or MAP_CLOSE */
 
   }
@@ -596,7 +596,7 @@ struct timeval tv;
       {
 	nbytes = read(fd1[0], buffer, sizeof (struct order));
 	p_order = (struct order *) &buffer[0];
-        printf("%s:rcv from erlang=%x\n", __PRETTY_FUNCTION__, p_order->msg_type);
+	//      printf("%s:rcv from erlang=%x\n", __PRETTY_FUNCTION__, p_order->msg_type);
 	switch(p_order->msg_type)
 	  {
 	  case MAP_MSG_SRV_REQ:
