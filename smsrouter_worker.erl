@@ -3,6 +3,9 @@
 %% dynamic worker, started when DLG_OPEN_IND received
 %%
 
+%% lets try to use feature0 - no need to send SRI SM to HLR,
+%% always send already configured SRI_SM_ACK to SMSC
+%% with fake IMSI
 
 %% this should be used to construct binary to send to C node
 
