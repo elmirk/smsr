@@ -80,7 +80,8 @@
 
 -export([get_oa/1,
 	 test/0,
-	 test2/0,
+	 test2_0/0,
+	 test2_1/0,
 	 test3/0,
 	 parse/1,
 	 create_sms_submit/2]).
@@ -108,6 +109,7 @@
 
 -define(sms_deliver, 0).
 -define(sms_submit, 1).
+-define(default_mr, 202).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -171,7 +173,7 @@ parse_sms_deliver(Data)->
 %%<<Scts:7/binary, R2/binary >> = R,
 %%<< Udl:8, Ud/binary >> = R2,
 
-    Out = #sm_rp_ui{message_type = sms_deliver,
+    #sm_rp_ui{message_type = sms_deliver,
 		       oa_data = Oa_data,
 		       oa_length = OAlength,
 		       oa_type = OAtype,
@@ -196,7 +198,7 @@ parse_flags(sms_submit, Flags)->
 
 
 
-parse_sms_submit(Data)->
+parse_sms_submit(_Data)->
     ok.
 
 get_oa(Data)->
@@ -226,7 +228,7 @@ decode_oa_carefully(_Type,_Length,_Rest)->
 %%for even number of semioctets of gsm7bit coded OA 
 decode_alphanum_oa(Length, Data) when (( Length band 1) == 0) ->
     OAnum_bytes = Length div 2,
-    << OA:OAnum_bytes, Rest/binary >> = Data,  
+    << OA:OAnum_bytes/binary, Rest/binary >> = Data,  
     {OA, Rest};
 decode_alphanum_oa(Length, Data)->
     OAnum_bytes = (Length+1) div 2,
@@ -245,38 +247,27 @@ create_sms_submit(Sms_deliver, Tp_da)->
 
     %%Sms_deliver = get(sms_deliver),
     %%Sms_deliver = test2(),
+%% Flags
+%% 0... .... TP-RP   Reply Path is not set
+%% .?.. .... TP-UDHI 0: TP-UD contains only short message, 1 - contains header
+%% ..0. .... TP-SRR 1: status report requested, 0 - status report not requested
+%% ...1 0... TP-VPF relative format
+%% .... .0.. TP-RD 1: insturct SC to reject duplicates, 0 - duplicates allowed
+%% .... ..01 TP-MTI: sms-submit 
 
-case Sms_deliver#sm_rp_ui.oa_type of
-    16#91->
-	MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
-	List = [ [0, 48 + Digit] || Digit <- MsisdnDigits, Digit < 10],
-	io:format("List = ~w~n", [lists:flatten(List)]),
-	UDPrefix = lists:flatten(List) ++ [0,58,0,32],
-	%%PrefixLength = length(UDPrefix),
-	io:format("ud = ~p, udl = ~p ~n", [Sms_deliver#sm_rp_ui.ud, Sms_deliver#sm_rp_ui.udl]),
-	{UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
-		       8 ->
-			   modify_user_data(UDPrefix,
-					    Sms_deliver#sm_rp_ui.udl,
-					    Sms_deliver#sm_rp_ui.ud,
-					    Sms_deliver#sm_rp_ui.udhi
-					   );
-		       _Other ->
-			   {Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud}
-		   end;
-     16#d0->
-	{UDL,UD} ={Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud}
-end,
+    {NewUDL, NewUD} = case Sms_deliver#sm_rp_ui.udhi of
+			  1->
+			      Flags = 16#51,
+			      {Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud};
+			  0 ->
+			      Flags = 16#11,
+			      construct_new_ud(Sms_deliver)
+		      end,
 
 io:format("sms deliver = ~w~n", [Sms_deliver]),
-    case Sms_deliver#sm_rp_ui.udhi of
-	1->
-	    Flags = 16#51;
-	0 ->
-	    Flags = 16#11
-    end,
+
     Bin0 = <<Flags>>,
-    Mr=202,
+    Mr=?default_mr,
 %%Pid = Sms_deliver#sm_rp_ui.pid,
     Bin2 = <<Bin0/binary, Mr >>,
     Da = list_to_binary(Tp_da),
@@ -284,11 +275,38 @@ io:format("sms deliver = ~w~n", [Sms_deliver]),
     Bin4 = << Bin3/binary, (Sms_deliver#sm_rp_ui.pid) >>,
     Bin5 = << Bin4/binary, (Sms_deliver#sm_rp_ui.dcs) >>,
     Bin6 = << Bin5/binary, 255 >>,
-    Bin7 = << Bin6/binary, UDL:8 >>,
-    Bin8 = << Bin7/binary, UD/binary>>,
+    Bin7 = << Bin6/binary, NewUDL:8 >>,
+    Bin8 = << Bin7/binary, NewUD/binary>>,
 io:format("sm rp ui itog = ~p~n",[Bin8]),
     Bin8.
 
+
+%% function to construct new text for sms concatenad with DA
+%% initially works for international OA types
+%% for alphanumeric OA there is no prefix and no text modification
+construct_new_ud(Sms_deliver)->
+    case Sms_deliver#sm_rp_ui.oa_type of
+	16#91->
+	    MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
+	    List = [ [0, 48 + Digit] || Digit <- MsisdnDigits, Digit < 10],
+	    io:format("List = ~w~n", [lists:flatten(List)]),
+	    UDPrefix = lists:flatten(List) ++ [0,58,0,32],
+	    %%PrefixLength = length(UDPrefix),
+	    io:format("ud = ~p, udl = ~p ~n", [Sms_deliver#sm_rp_ui.ud, Sms_deliver#sm_rp_ui.udl]),
+	    {UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
+			   8 ->
+			       modify_user_data(UDPrefix,
+						Sms_deliver#sm_rp_ui.udl,
+						Sms_deliver#sm_rp_ui.ud,
+						Sms_deliver#sm_rp_ui.udhi
+					       );
+			   _Other ->
+			       {Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud}
+		       end;
+	16#d0->
+	    {UDL,UD} ={Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud}
+    end,
+    {UDL, UD}.
 
 
 modify_user_data(UDPrefix, Udl, Ud, Udhi)->
@@ -314,8 +332,9 @@ test()->
     << 16#97, 16#20, 16#17, 16#11, 16#82, 16#f7 >> = get_oa(Data),
     ok.
 
-test2()->
-    Data = << 16#24, 16#0b, 16#91, 16#97, 16#20,
+%%input test sms_deliver with udhi = 0, and OA num = international
+test2_0()->
+    Data  = << 16#24, 16#0b, 16#91, 16#97, 16#20,
 	     16#17, 16#11, 16#82, 16#f7, 16#00,
 	     16#08, 16#81, 16#90, 16#12, 16#00,
 	     16#53, 16#23, 16#21, 16#08, 16#04,
@@ -323,8 +342,17 @@ test2()->
 	     16#04, 16#42 >>,
     parse(Data).
 
+%%input test sms_deliver with udhi = 1, and OA num = alphanumeric Letai
+test2_1() ->
+    Data = << 16#64, 16#0a, 16#d0, 16#cc, 16#32, 16#3d,  16#9c, 16#06,
+	      0, 16#08, 16#81, 16#21, 16#12, 16#41, 16#50, 16#90, 16#21,
+	      16#1a, 16#05, 0, 16#03, 1, 1, 1,
+	      16#04, 16#42, 16#04, 16#35, 16#04, 16#41, 16#04, 16#42,
+	      0, 16#20, 0, 16#31, 0, 16#34, 0, 16#3a, 0, 16#30, 0, 16#30 >>,
+    parse(Data).
+
 test3() ->
-    Sms_deliver = test2(),
+    Sms_deliver = test2_1(),
     Tp_da = [11,145,151,21,96,82,85,245],
     Out = create_sms_submit(Sms_deliver, Tp_da),
     io:format("out = ~p~n", [Out]).
