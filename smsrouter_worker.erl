@@ -201,7 +201,8 @@ handle_cast({delimit_ind, Request}, State) ->
 	    %% CorrealatioId = fake IMSI
 	    %%CorrelationId = 250270900000000 + Sid,
 	    put(cid, Cid),
-	    sri_sm_req(State#dialog.components);
+%%	    sri_sm_req(State#dialog.components);
+	    sri_sm_ack(State#dialog.components, State#dialog.dlg_id);
 	?mapst_mt_fwd_sm_ind ->
 	    io:format("stay before send mt forward sm ack ~n"),
 	    mt_forward_sm_ack(State#dialog.dlg_id),
@@ -244,8 +245,8 @@ handle_cast({mapdt_close_ind, Request}, State) ->
 	    true
     end,
 
-
-    {noreply, State}.
+{stop, normal, State}.
+%%    {noreply, State}.
 
 
 
@@ -275,6 +276,7 @@ handle_info(_Info, State) ->
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
 		State :: term()) -> any().
 terminate(_Reason, _State) ->
+    io:format("gen_server with pid = ~p terminated with terminate callback ~n",[self()]),
     ok.
 
 %%--------------------------------------------------------------------
@@ -406,7 +408,7 @@ mo_forward_sm_req(Sm_Rp_Oa, Tp_Da)->
 
 mo_fwd_sm_cnf()->
     io:format("mo forward sm returned result!~n"),
-    io:format("user err = ~p~n", get(user_err)).
+    io:format("user err = ~p~n", [get(user_err)]).
 
 %% parse binary data received from C node
 %% this is for received mapdt_dlg_ind received from C node

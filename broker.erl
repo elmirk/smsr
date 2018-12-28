@@ -63,7 +63,7 @@ start_link() ->
 			      ignore.
 init([]) ->
     process_flag(trap_exit, true),
-    SeqList = lists:seq(0, 10),
+    SeqList = lists:seq(0, 1024),
     Q = queue:from_list(SeqList),
     Result = ets:new(didpid, [set, named_table]),
     ets:new(piddid, [set, named_table]),
@@ -145,7 +145,7 @@ handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtis
     {any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_delimiter_req, ODlgId, Data2},
     {noreply, State};
 handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtism_rsp, Data}, State)->
-    %%io:format("send back to c node ~n"),
+    io:format("send back to c node mapst_snd_rtism_rsp ~n"),
 %% TODO!! what about DlgId here!!!!
     [{_, ODlgId}] = ets:lookup(piddid, Worker),
     {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
@@ -209,7 +209,6 @@ handle_info({mapdt_open_cnf, DlgId, Data}, State) ->
     gen_server:cast(Pid, {mapdt_open_cnf, Data}),
     {noreply, State};
 
-
 handle_info({srv_ind, DlgId, Data}, State) ->
     io:format("srv ind received in broker with DlgId = ~p~n",[DlgId]),
     [{_, Pid}] = ets:lookup(didpid, DlgId),
@@ -236,7 +235,13 @@ handle_info({mapdt_close_ind, DlgId, Data}, State) ->
     {noreply, NewState};
 
 
+handle_info({'EXIT',Pid, normal}, State)->
+    io:format("~p exited with reason = ~p~n",[Pid, normal]),
+    {noreply, State};
 
+handle_info({'EXIT', Pid, Reason}, State)->
+    io:format("~p exited with reason = ~p~n",[Pid, Reason]),
+    {noreply, State};
 
 handle_info(_Info, State) ->
     {noreply, State}.
